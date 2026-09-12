@@ -34,10 +34,10 @@ const PAGING_SCHEMA = {
     .describe("Cursor from a previous call's response, to fetch the next page."),
 };
 
-export class MusixBoxMCP extends McpAgent<Env, unknown, UserProps> {
+export class MusicBoxMCP extends McpAgent<Env, unknown, UserProps> {
   server = new McpServer({
-    name: "musix-box",
-    title: "Musix Box",
+    name: "music-box",
+    title: "Music Box",
     version: PACKAGE_VERSION,
   });
 

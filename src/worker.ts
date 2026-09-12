@@ -1,10 +1,10 @@
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
 
 import { SpotifyHandler } from "./spotify_handler";
-import { MusixBoxMCP } from "./index";
+import { MusicBoxMCP } from "./index";
 
 /**
- * A ready-to-deploy musix-box server.
+ * A ready-to-deploy music-box server.
  *
  * Assembled the same way `other-memory`'s `worker.ts` is: the MCP agent,
  * Spotify as the OAuth provider, and the endpoints wired together. Kept
@@ -12,26 +12,26 @@ import { MusixBoxMCP } from "./index";
  * not also hand you a running worker, so a deployment that needs to change
  * something has somewhere to do it without editing the library's own source.
  */
-export default buildWorker(MusixBoxMCP);
+export default buildWorker(MusicBoxMCP);
 
 /**
  * Re-exported by name so `wrangler.jsonc`'s Durable Object binding can find
  * the class. A default export alone is not enough — `other-memory`'s own
  * worker.ts needed this too.
  */
-export { MusixBoxMCP };
+export { MusicBoxMCP };
 
 /**
- * Assemble a worker around a `MusixBoxMCP` class.
+ * Assemble a worker around a `MusicBoxMCP` class.
  *
- * @param musixBoxMcp - `MusixBoxMCP` or a subclass of it.
+ * @param musicBoxMcp - `MusicBoxMCP` or a subclass of it.
  * @returns A worker ready to be a `wrangler.jsonc` `main`.
  */
-export function buildWorker(musixBoxMcp: typeof MusixBoxMCP) {
+export function buildWorker(musicBoxMcp: typeof MusicBoxMCP) {
   return new OAuthProvider({
     apiHandlers: {
-      "/sse": musixBoxMcp.serveSSE("/sse"),
-      "/mcp": musixBoxMcp.serve("/mcp"),
+      "/sse": musicBoxMcp.serveSSE("/sse"),
+      "/mcp": musicBoxMcp.serve("/mcp"),
     },
     defaultHandler: SpotifyHandler as never,
     authorizeEndpoint: "/authorize",

@@ -4,7 +4,7 @@
   // Copy this to wrangler.jsonc and fill in the marked values.
   // wrangler.jsonc is gitignored, so your account details stay yours.
 
-  "name": "musix-box",
+  "name": "music-box",
   "main": "src/worker.ts",
   "compatibility_date": "2025-03-10",
   "compatibility_flags": ["nodejs_compat"],
@@ -12,14 +12,14 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["MusixBoxMCP"]
+      "new_sqlite_classes": ["MusicBoxMCP"]
     }
   ],
   "durable_objects": {
     "bindings": [
       {
         "name": "MCP_OBJECT",
-        "class_name": "MusixBoxMCP"
+        "class_name": "MusicBoxMCP"
       }
     ]
   },
