@@ -1,4 +1,4 @@
-# music-box
+# hurdy-gurdy
 
 An MCP server giving an agent real Spotify Web API access — full paginated
 library, following, and search — instead of the capped, fuzzy first-party
@@ -12,7 +12,7 @@ liked-songs library, followed artists, saved albums, or playlists. Asking
 "what bands do I like" cannot be answered completely by a connector that
 can only return 5 results.
 
-`music-box` calls the real Spotify Web API directly, with tools that page
+`hurdy-gurdy` calls the real Spotify Web API directly, with tools that page
 through complete lists rather than returning a capped snapshot.
 
 ## Architecture

@@ -1,5 +1,5 @@
 {
-  "name": "music-box",
+  "name": "hurdy-gurdy",
   "version": "0.1.0",
   "description": "An MCP server giving an agent real Spotify Web API access — full paginated library, following, and search — instead of the capped, fuzzy first-party connector.",
   "type": "module",
@@ -7,7 +7,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/idin/music-box.git"
+    "url": "git+https://github.com/idin/hurdy-gurdy.git"
   },
   "scripts": {
     "dev": "wrangler dev",
