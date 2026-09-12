@@ -15,6 +15,13 @@ import { MusixBoxMCP } from "./index";
 export default buildWorker(MusixBoxMCP);
 
 /**
+ * Re-exported by name so `wrangler.jsonc`'s Durable Object binding can find
+ * the class. A default export alone is not enough — `other-memory`'s own
+ * worker.ts needed this too.
+ */
+export { MusixBoxMCP };
+
+/**
  * Assemble a worker around a `MusixBoxMCP` class.
  *
  * @param musixBoxMcp - `MusixBoxMCP` or a subclass of it.
