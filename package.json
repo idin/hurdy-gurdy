@@ -1,0 +1,34 @@
+{
+  "name": "musix-box",
+  "version": "0.1.0",
+  "description": "An MCP server giving an agent real Spotify Web API access — full paginated library, following, and search — instead of the capped, fuzzy first-party connector.",
+  "type": "module",
+  "author": "Idin K",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/idin/musix-box.git"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest run --project worker --project repository",
+    "test:integration": "vitest run --project integration",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "^0.8.1",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "agents": "^0.17.1",
+    "hono": "^4.12.27",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.20.3",
+    "@cloudflare/workers-types": "^5.20260801.1",
+    "@types/node": "^26.2.0",
+    "typescript": "^5.8.2",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.120.0"
+  }
+}

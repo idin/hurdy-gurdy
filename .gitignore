@@ -1,0 +1,25 @@
+# Credentials. Worker secrets are set with `wrangler secret put` and live in
+# Cloudflare; local values belong in .dev.vars, which never leaves the machine.
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+*.pem
+*.key
+
+# npm auth token, written by `npm config set ... --location project` when
+# publishing locally. Carries a live publish credential — must never be
+# committed.
+.npmrc
+
+# Deployment configuration, which carries account-specific identifiers.
+wrangler.jsonc
+
+# Dependencies, build output and generated types
+node_modules/
+.wrangler/
+worker-configuration.d.ts
+*.log
+
+# macOS
+.DS_Store

@@ -1,0 +1,51 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+
+  // Copy this to wrangler.jsonc and fill in the marked values.
+  // wrangler.jsonc is gitignored, so your account details stay yours.
+
+  "name": "musix-box",
+  "main": "src/worker.ts",
+  "compatibility_date": "2025-03-10",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["MusixBoxMCP"]
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "MCP_OBJECT",
+        "class_name": "MusixBoxMCP"
+      }
+    ]
+  },
+
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      // From `npx wrangler kv namespace create OAUTH_KV`.
+      "id": "0000000000000000000000000000test"
+    },
+    {
+      "binding": "SPOTIFY_TOKENS",
+      // From `npx wrangler kv namespace create SPOTIFY_TOKENS`.
+      "id": "0000000000000000000000000000test"
+    }
+  ],
+
+  // Not secret. Secrets are set with `wrangler secret put` — see the README.
+  "vars": {
+    // Only this Spotify account may use the server. An authenticated
+    // stranger is still a stranger. Find it via the /me endpoint or the
+    // Spotify account overview page.
+    "ALLOWED_SPOTIFY_USER_ID": "example"
+  },
+
+  "observability": {
+    "enabled": true
+  }
+}
