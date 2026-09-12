@@ -117,6 +117,69 @@ describe("SpotifyProvider.getFollowedArtists", () => {
   });
 });
 
+describe("SpotifyProvider.getPlaylistTracks", () => {
+  const PLAYLIST_ITEMS_RESPONSE = {
+    href: "https://api.spotify.com/v1/playlists/playlist-1/items?offset=0&limit=1",
+    limit: 1,
+    next: null,
+    offset: 0,
+    previous: null,
+    total: 1,
+    items: [
+      {
+        added_at: "2026-01-01T00:00:00Z",
+        item: {
+          id: "track-1",
+          name: "Karma Police",
+          artists: [{ id: "artist-1", name: "Radiohead" }],
+          album: { id: "album-1", name: "OK Computer" },
+          duration_ms: 261973,
+          uri: "spotify:track:track-1",
+        },
+      },
+    ],
+  };
+
+  test("requests /playlists/{id}/items, not the deprecated /tracks path", async () => {
+    // Spotify's February 2026 migration renamed GET /playlists/{id}/tracks
+    // to GET /playlists/{id}/items, and the item field from `track` to
+    // `item`. Asserted on the actual request URL, not just the mapped
+    // output, because a test that only checks the output can pass against
+    // a stale path if the fake response is shaped to match it regardless.
+    const fetchSpy = vi.fn(
+      async () => new Response(JSON.stringify(PLAYLIST_ITEMS_RESPONSE), { status: 200 }),
+    );
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    const provider = new SpotifyProvider("test-token");
+
+    await provider.getPlaylistTracks("playlist-1");
+
+    const requestedUrl = (fetchSpy as ReturnType<typeof vi.fn>).mock.calls[0][0] as URL;
+    expect(requestedUrl.pathname).toBe("/v1/playlists/playlist-1/items");
+    expect(requestedUrl.pathname).not.toContain("/tracks");
+  });
+
+  test("maps the item field (not the deprecated track field) onto Track", async () => {
+    globalThis.fetch = vi.fn(
+      async () => new Response(JSON.stringify(PLAYLIST_ITEMS_RESPONSE), { status: 200 }),
+    ) as unknown as typeof fetch;
+    const provider = new SpotifyProvider("test-token");
+
+    const page = await provider.getPlaylistTracks("playlist-1");
+
+    expect(page.items).toEqual([
+      {
+        id: "track-1",
+        name: "Karma Police",
+        artistNames: ["Radiohead"],
+        albumName: "OK Computer",
+        durationMs: 261973,
+        uri: "spotify:track:track-1",
+      },
+    ]);
+  });
+});
+
 describe("SpotifyProvider.search", () => {
   test("only requested types are present, others come back as empty pages", async () => {
     globalThis.fetch = fakeSpotifyFetch({

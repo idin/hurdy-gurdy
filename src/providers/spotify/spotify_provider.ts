@@ -154,6 +154,6 @@ export class SpotifyProvider implements MediaProvider {
       limit: Math.min(options.limit ?? LIBRARY_MAX_LIMIT, LIBRARY_MAX_LIMIT),
       offset: options.cursor ? Number(options.cursor) : 0,
     });
-    return offsetPage(paging, (entry) => toTrack(entry.track));
+    return offsetPage(paging, (entry) => toTrack(entry.item));
   }
 }

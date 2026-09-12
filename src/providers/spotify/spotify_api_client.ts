@@ -197,12 +197,22 @@ export class SpotifyApiClient {
     return this.get("/me/playlists", { limit: options.limit, offset: options.offset });
   }
 
-  /** GET /v1/playlists/{id}/tracks — every track in one playlist. Scope: playlist-read-private. */
+  /**
+   * GET /v1/playlists/{id}/items — every track in one playlist.
+   * Scope: playlist-read-private.
+   *
+   * `/tracks` is the deprecated form of this endpoint as of Spotify's
+   * February 2026 migration: the path became `/items`, and the item's field
+   * holding the track object was renamed from `track` to `item`. Verified
+   * directly against Spotify's own reference page
+   * (get-playlists-items) before writing this, not assumed from the older
+   * form still used elsewhere.
+   */
   async getPlaylistTracks(
     playlistId: string,
     options: { limit?: number; offset?: number } = {},
-  ): Promise<SpotifyPagingObject<{ track: SpotifyTrack }>> {
-    return this.get(`/playlists/${playlistId}/tracks`, {
+  ): Promise<SpotifyPagingObject<{ item: SpotifyTrack }>> {
+    return this.get(`/playlists/${playlistId}/items`, {
       limit: options.limit,
       offset: options.offset,
     });
