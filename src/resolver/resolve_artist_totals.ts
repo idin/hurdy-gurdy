@@ -19,6 +19,10 @@
  */
 
 import type { MediaProvider } from "../providers/media_provider";
+import {
+  findRecordingByIsrc,
+  isMusicBrainzBusy,
+} from "../catalogue/musicbrainz_client";
 import type { SpotifyApiClient } from "../providers/spotify/spotify_api_client";
 import {
   advanceResolution,
@@ -85,6 +89,10 @@ export async function runResolutionTask(
       }
       const finished = await advanceLikedTracksBackfill(database, provider, task);
       return { outcome: finished ? "completed" : "advanced" };
+    }
+    if (task.kind === "resolve-musicbrainz") {
+      await resolveMusicBrainzIdentity(database, task);
+      return { outcome: "completed" };
     }
     if (task.kind === "artist-album-count") {
       await resolveAlbumCount(database, client, task);
@@ -214,4 +222,56 @@ async function advanceLikedTracksBackfill(
     accumulated: task.accumulated,
   });
   return false;
+}
+
+/**
+ * Fill in one track's MusicBrainz identity.
+ *
+ * Writes the recording and work ids when MusicBrainz knows them, and marks
+ * the task complete either way — **including when there is no work
+ * relation**. That absence is an answer: recording-to-work is among the least
+ * complete relations in a crowd-sourced database, and retrying a track whose
+ * link simply does not exist would spend the one-per-second budget
+ * rediscovering nothing, forever.
+ *
+ * A 503 is different and is allowed to throw, so the task is retried: it
+ * means the question was never asked rather than answered with silence.
+ */
+async function resolveMusicBrainzIdentity(
+  database: D1Database,
+  task: ResolutionTask,
+): Promise<void> {
+  const row = await database
+    .prepare(`SELECT isrc FROM track WHERE uri = ?`)
+    .bind(task.subjectUri)
+    .first<{ isrc: string | null }>();
+
+  if (row?.isrc == null) {
+    // Nothing to look up. Completing rather than failing keeps a track with
+    // no ISRC from being retried three times before being given up on.
+    await completeResolution(database, task);
+    return;
+  }
+
+  try {
+    const recording = await findRecordingByIsrc(row.isrc);
+    if (recording !== null) {
+      await database
+        .prepare(
+          `UPDATE track SET recording_mbid = ?, work_mbid = ?, work_title = ? WHERE uri = ?`,
+        )
+        .bind(recording.mbid, recording.workMbid, recording.workTitle, task.subjectUri)
+        .run();
+    }
+    await completeResolution(database, task);
+  } catch (error) {
+    if (isMusicBrainzBusy(error)) {
+      // Rate-limited. Rethrow so the caller records a failure and the task is
+      // tried again — the answer was never given, so it is not known.
+      throw error;
+    }
+    // A 404 or a malformed response is an answer: MusicBrainz does not know
+    // this ISRC. Completing stops it being asked again.
+    await completeResolution(database, task);
+  }
 }

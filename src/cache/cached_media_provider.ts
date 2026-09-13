@@ -239,6 +239,52 @@ export class CachedMediaProvider implements MediaProvider {
    * Never fails a read. A missing denominator is a smaller cost than a failed
    * question.
    */
+  /**
+   * Queue MusicBrainz identity for tracks that have an ISRC and no work yet.
+   *
+   * Only tracks with an ISRC — the ISRC is the lookup key, so a track without
+   * one has nothing to resolve and queueing it would spend a retry on a
+   * question that cannot be asked.
+   *
+   * Lowest priority. The composition grouping is genuinely useful and nobody
+   * is waiting on it, while artist totals sit behind numbers a caller sees
+   * immediately.
+   */
+  private async queueMusicBrainzIdentity(trackUris: string[]): Promise<void> {
+    if (trackUris.length === 0) {
+      return;
+    }
+    try {
+      const placeholders = trackUris.map(() => "?").join(",");
+      const { results } = await this.database
+        .prepare(
+          `SELECT uri FROM track
+             WHERE uri IN (${placeholders})
+               AND isrc IS NOT NULL
+               AND recording_mbid IS NULL`,
+        )
+        .bind(...trackUris)
+        .all<{ uri: string }>();
+
+      const unresolved = (results ?? []).map((row) => row.uri);
+      if (unresolved.length === 0) {
+        return;
+      }
+
+      await enqueueResolutions(
+        this.database,
+        unresolved.map((uri) => ({
+          kind: "resolve-musicbrainz" as const,
+          subjectUri: uri,
+          priority: RESOLUTION_PRIORITY.SEEN_IN_PASSING,
+        })),
+        this.now(),
+      );
+    } catch {
+      // A missing composition link is not worth failing a read over.
+    }
+  }
+
   private async queueArtistTotals(
     artistUris: string[],
     priority: ResolutionPriority,
@@ -314,6 +360,7 @@ export class CachedMediaProvider implements MediaProvider {
       [...new Set(page.items.flatMap((track) => track.artists.map((artist) => artist.uri)))],
       RESOLUTION_PRIORITY.HAS_LIKED_TRACKS,
     );
+    await this.queueMusicBrainzIdentity(page.items.map((track) => track.uri));
     return page;
   }
 

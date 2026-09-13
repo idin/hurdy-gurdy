@@ -71,6 +71,17 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
      -- permanent catalogue will be keyed on. Arrives free on every /me/tracks
      -- page; the type simply never asked for it until 2026-09-13.
      isrc         TEXT,
+     -- MusicBrainz identity, filled in by the resolver. recording_mbid names
+     -- this exact performance; work_mbid names the COMPOSITION, which is what
+     -- groups different artists' versions of one song — the level ISRC
+     -- deliberately separates and Spotify does not model at all.
+     --
+     -- A null work_mbid means MusicBrainz has no recording-to-work link, not
+     -- that no composition exists. That relation is among the least complete
+     -- in a crowd-sourced database.
+     recording_mbid TEXT,
+     work_mbid    TEXT,
+     work_title   TEXT,
      -- From the data export's streaming history, which the Web API cannot
      -- supply at any price. Plays past the 30s skip threshold and plays
      -- abandoned before it are counted separately: a track dropped after
@@ -83,6 +94,7 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
    )`,
 
   `CREATE INDEX IF NOT EXISTS track_song_key ON track (song_key)`,
+  `CREATE INDEX IF NOT EXISTS track_work_mbid ON track (work_mbid)`,
 
   `CREATE INDEX IF NOT EXISTS track_album ON track (album_uri)`,
   `CREATE INDEX IF NOT EXISTS track_is_liked ON track (is_liked)`,

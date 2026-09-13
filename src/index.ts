@@ -217,9 +217,11 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
     }
 
     let rateLimited = false;
+    let usesMusicBrainz = false;
     try {
       const task = await findNextResolution(database);
       if (task !== null) {
+        usesMusicBrainz = task.kind === "resolve-musicbrainz";
         const accessToken = await getAccessToken(
           this.env.SPOTIFY_TOKENS,
           this.props?.spotifyUserId ?? "",
@@ -254,7 +256,7 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
     }
 
     await this.schedule(
-      findNextTickDelay({ pending, rateLimited }),
+      findNextTickDelay({ pending, rateLimited, usesMusicBrainz }),
       "continueResolving",
       undefined,
       { idempotent: true },

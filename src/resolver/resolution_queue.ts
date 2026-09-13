@@ -35,7 +35,16 @@ export type ResolutionKind =
    * 2,282 liked tracks is 46 pages nobody is going to request one at a time.
    * Queued as resolver work so it crawls on its own.
    */
-  | "backfill-liked-tracks";
+  | "backfill-liked-tracks"
+  /**
+   * Resolve one track's MusicBrainz identity from its ISRC.
+   *
+   * Two requests against a **one-per-second global** budget, which is why it
+   * is queued rather than done inline. It supplies the composition — the
+   * level that groups different artists' recordings of one song, which ISRC
+   * deliberately separates and Spotify does not model.
+   */
+  | "resolve-musicbrainz";
 
 /**
  * How urgent a piece of work is. Lower drains first.

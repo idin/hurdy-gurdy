@@ -56,6 +56,20 @@ export const BACKLOG_THRESHOLD = 20;
 export const RESOLVER_BACKOFF_SECONDS = 60;
 
 /**
+ * Seconds between ticks while MusicBrainz work is being drained.
+ *
+ * Their documented limit is one request per second per IP, and a lookup is
+ * two hops — ISRC to recording, recording to work. Three seconds leaves
+ * margin for the fact that the limit is shared across everything on the
+ * address, and for their own advice that exceeding it blocks *all* requests
+ * rather than just the excess.
+ *
+ * Observed 2026-09-13: three lookups at roughly 1.2-second spacing, two
+ * refused with "The MusicBrainz web server is currently busy."
+ */
+export const MUSICBRAINZ_TICK_SECONDS = 3;
+
+/**
  * Seconds to wait when the queue is empty.
  *
  * Long, because nothing is pending and a tick that finds nothing is pure
@@ -75,9 +89,24 @@ export const RESOLVER_IDLE_SECONDS = 300;
 export function findNextTickDelay(outcome: {
   pending: number;
   rateLimited: boolean;
+  /**
+   * Whether the task just run talks to MusicBrainz.
+   *
+   * Their limit is **one request per second, globally per IP** — shared with
+   * everything else on that address, and exceeding it returns 503 on *all*
+   * requests until the rate drops. So a MusicBrainz task cannot ride the
+   * burst rate, however long the queue is: bursting would not merely fail
+   * itself, it would take out every other MusicBrainz call alongside it.
+   *
+   * Each lookup is two hops, so the floor is two seconds plus margin.
+   */
+  usesMusicBrainz?: boolean;
 }): number {
   if (outcome.rateLimited) {
     return RESOLVER_BACKOFF_SECONDS;
+  }
+  if (outcome.usesMusicBrainz === true && outcome.pending > 0) {
+    return MUSICBRAINZ_TICK_SECONDS;
   }
   if (outcome.pending === 0) {
     return RESOLVER_IDLE_SECONDS;

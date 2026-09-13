@@ -63,6 +63,18 @@ export const MIGRATIONS: readonly Migration[] = [
     description: "track gains isrc, the cross-service recording identifier",
     statement: "ALTER TABLE track ADD COLUMN isrc TEXT",
   },
+  {
+    description: "track gains recording_mbid, MusicBrainz's id for this performance",
+    statement: "ALTER TABLE track ADD COLUMN recording_mbid TEXT",
+  },
+  {
+    description: "track gains work_mbid, the composition that groups different artists' versions",
+    statement: "ALTER TABLE track ADD COLUMN work_mbid TEXT",
+  },
+  {
+    description: "track gains work_title",
+    statement: "ALTER TABLE track ADD COLUMN work_title TEXT",
+  },
 ];
 
 /**
