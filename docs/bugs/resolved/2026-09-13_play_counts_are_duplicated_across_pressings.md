@@ -65,3 +65,47 @@ sums across tracks.
 Logged rather than patched. Patching it by matching on artist as well would
 reduce the inflation without removing it, and would look like a fix — which
 is worse than a known-wrong number that is documented as wrong.
+
+## Fixed and verified — 2026-09-13
+
+Counts moved to `song_plays`, keyed once per recording, with `track_plays`
+joining them back out.
+
+Verified against the live database:
+
+```
+songs    6517
+plays    9153
+skips    6446
+```
+
+9,153 + 6,446 = **15,599**, which is exactly the number of play events in the
+export. Previously the per-row counts summed to 7,297 across duplicated rows,
+a figure that corresponded to nothing.
+
+And the case that exposed it:
+
+```
+ 21 plays   7 skips  Eye In The Sky    The Alan Parsons Project
+```
+
+One row, not three.
+
+### The detour worth recording
+
+The fix took several rounds longer than it should have, for a reason that was
+mine. `buildPlayKey` used a literal NUL byte as its separator — chosen so no
+printable character in a track name could forge it. A NUL cannot appear in
+SQL text, so every generated INSERT was rejected.
+
+SQLite reported `unrecognized token: "'ruthie henshall"` — pointing at the
+apostrophe *after* the NUL rather than at the NUL itself. That sent me
+through shell quoting, `--file` versus `--command`, and statement splitting
+before dumping the actual bytes, which showed it immediately:
+
+```
+around 'fantine': "ie henshall\x00fantine''s death - live'"
+```
+
+**An error's position is where the parser noticed, not where the problem
+is.** Dumping the bytes should have been the first move, not the fifth.
