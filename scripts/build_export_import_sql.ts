@@ -115,14 +115,20 @@ const plays = [0, 1].flatMap((index) => {
   return existsSync(path) ? readExportedPlays(readFileSync(path, "utf8")) : [];
 });
 
-for (const summary of summarisePlays(plays).values()) {
-  // Matched on track name alone. The history carries no URIs, and joining
-  // through artist as well would need artist links the export cannot supply.
-  // A name that matches nothing simply updates no rows.
+for (const [playKey, summary] of summarisePlays(plays)) {
+  // Written once per SONG, not once per pressing. Matching on name and
+  // updating every row that matched gave three copies of "Eye In The Sky"
+  // 21 plays each — 450 duplicated names among 2,955 counted rows on
+  // 2026-09-13. A play belongs to the recording; the track_plays view joins
+  // it back to whichever pressings share the name.
   statements.push(
-    `UPDATE track SET play_count = ${summary.playCount}, skip_count = ${summary.skipCount},
-       last_played = ${quote(summary.lastPlayed)}
-     WHERE LOWER(name) = LOWER(${quote(summary.trackName)});`,
+    `INSERT INTO song_plays (play_key, artist_name, track_name, play_count, skip_count, last_played, imported_at)
+       VALUES (${quote(playKey)}, ${quote(summary.artistName)}, ${quote(summary.trackName)}, ${summary.playCount}, ${summary.skipCount}, ${quote(summary.lastPlayed)}, ${now})
+     ON CONFLICT(play_key) DO UPDATE SET
+       play_count = excluded.play_count,
+       skip_count = excluded.skip_count,
+       last_played = excluded.last_played,
+       imported_at = excluded.imported_at;`,
   );
 }
 

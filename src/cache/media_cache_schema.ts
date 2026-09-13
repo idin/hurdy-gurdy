@@ -179,6 +179,34 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
 
   `CREATE INDEX IF NOT EXISTS pinned_track_song ON pinned_track (song_key)`,
 
+  /*
+   * Play counts, keyed by the recording rather than by a pressing of it.
+   *
+   * The bug this fixes: the streaming history identifies tracks by name
+   * alone — no URIs — so writing a count onto every row whose name matched
+   * gave three copies of "Eye In The Sky" 21 plays each. 450 of 2,955
+   * counted rows were duplicated that way on 2026-09-13.
+   *
+   * A play belongs to the song. Storing it here once, and joining back to
+   * whichever pressings share that name, means the number is right however
+   * many copies of the record are in the library.
+   *
+   * Keyed on the lowercased name because that is what the history gives.
+   * When `song_key` is populated from API durations this becomes keyable on
+   * the stronger identity, and the join below changes with it.
+   */
+  `CREATE TABLE IF NOT EXISTS song_plays (
+     play_key     TEXT PRIMARY KEY,
+     artist_name  TEXT NOT NULL,
+     track_name   TEXT NOT NULL,
+     play_count   INTEGER NOT NULL DEFAULT 0,
+     skip_count   INTEGER NOT NULL DEFAULT 0,
+     last_played  TEXT,
+     imported_at  INTEGER NOT NULL
+   )`,
+
+  `CREATE INDEX IF NOT EXISTS song_plays_track_name ON song_plays (track_name)`,
+
   // --- Resolver work -------------------------------------------------------
   //
   // Declared here rather than in the resolver so there is exactly one place
@@ -309,6 +337,25 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
                WHERE twin.work_key =
                      REPLACE(this.work_key, '|live|', '|studio|')
             )`,
+
+  /*
+   * Play counts per track, read from the song-level table.
+   *
+   * A LEFT JOIN on name, so every pressing of a song reports the same count —
+   * which is correct, because it is the same song and the same listening.
+   * What it does NOT do is multiply the total: summing this view over
+   * distinct songs gives the real figure, where summing a per-row column did
+   * not.
+   */
+  `CREATE VIEW IF NOT EXISTS track_plays AS
+     SELECT
+       track.uri                              AS track_uri,
+       COALESCE(song_plays.play_count, 0)     AS play_count,
+       COALESCE(song_plays.skip_count, 0)     AS skip_count,
+       song_plays.last_played                 AS last_played
+     FROM track
+     LEFT JOIN song_plays
+            ON LOWER(song_plays.track_name) = LOWER(track.name)`,
 
   /*
    * Which playlists hold each track, as a comma-joined list of URIs.

@@ -201,15 +201,16 @@ export async function importPlaylists(
 /**
  * Write play counts and skips.
  *
- * **Joined by name, because the history carries no URIs.** That is the
- * weakest join in the project and it is stated rather than hidden: a track
- * whose name differs between the play event and the catalogue — a remaster
- * suffix, a featured-artist credit — will not match, and its plays are lost
- * rather than wrongly attributed.
+ * Written **once per song**, into `song_plays`, rather than onto every track
+ * row whose name matches. The first version did the latter and gave three
+ * copies of "Eye In The Sky" 21 plays each — 450 duplicated names among
+ * 2,955 counted rows. A play belongs to the recording, not to a pressing of
+ * it, and the `track_plays` view joins it back out.
  *
- * Losing them is the right failure. Attributing plays to the wrong recording
- * would corrupt the grading signal the taste model is built on, and a missing
- * count is visibly missing while a wrong one is not.
+ * The join is still by name, because the history carries no URIs. A name
+ * that matches nothing keeps its row in `song_plays` and simply joins to no
+ * track — the count is retained rather than lost, and becomes visible if the
+ * track is read later.
  *
  * @param database - Where the cache lives.
  * @param summaries - From `summarisePlays`.
@@ -221,24 +222,27 @@ export async function importPlayCounts(
 ): Promise<number> {
   const statements: D1PreparedStatement[] = [];
 
-  for (const summary of summaries.values()) {
+  for (const [playKey, summary] of summaries) {
     statements.push(
       database
         .prepare(
-          `UPDATE track
-              SET play_count = ?, skip_count = ?, last_played = ?
-            WHERE LOWER(name) = LOWER(?)
-              AND uri IN (
-                SELECT track_uri FROM track_artist
-                 WHERE artist_uri IN (SELECT uri FROM artist WHERE LOWER(name) = LOWER(?))
-              )`,
+          `INSERT INTO song_plays
+             (play_key, artist_name, track_name, play_count, skip_count, last_played, imported_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(play_key) DO UPDATE SET
+             play_count = excluded.play_count,
+             skip_count = excluded.skip_count,
+             last_played = excluded.last_played,
+             imported_at = excluded.imported_at`,
         )
         .bind(
+          playKey,
+          summary.artistName,
+          summary.trackName,
           summary.playCount,
           summary.skipCount,
           summary.lastPlayed,
-          summary.trackName,
-          summary.artistName,
+          Date.now(),
         ),
     );
   }

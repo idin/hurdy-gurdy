@@ -17,6 +17,7 @@ import {
   type CacheEntry,
   type CacheLookup,
 } from "./cache_entry";
+import { applyMigrations } from "./apply_migrations";
 import { MEDIA_CACHE_SCHEMA } from "./media_cache_schema";
 
 /**
@@ -43,6 +44,11 @@ export async function prepareMediaCache(database: D1Database): Promise<void> {
     return;
   }
   await database.batch(MEDIA_CACHE_SCHEMA.map((statement) => database.prepare(statement)));
+  // Creating is not enough. IF NOT EXISTS leaves an existing table alone, so
+  // a schema change reaches a fresh database and never a live one — which is
+  // exactly how a bulk import failed on 2026-09-13 with "no such column:
+  // play_count" against a table created before those columns existed.
+  await applyMigrations(database);
   preparedDatabases.add(database);
 }
 
