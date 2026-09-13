@@ -21,35 +21,70 @@ import {
 import type {
   Album,
   Artist,
+  Device,
   MediaProvider,
+  NowPlaying,
   Page,
   Playlist,
   SearchType,
   Track,
 } from "../media_provider";
 
+/**
+ * Coverage for something the library's contents have not been consulted for.
+ *
+ * Every mapper starts here and a caller that knows better overwrites it. The
+ * numerators need the cached liked tracks, which do not exist yet, so today
+ * every result carries zeros with null denominators. The **shape** is final,
+ * which is the part that matters: adding the cache later fills these in
+ * without any consumer seeing a different set of fields.
+ */
+const UNCOUNTED_COVERAGE = {
+  likedTrackCount: 0,
+  totalTrackCount: null,
+  hasAnyLiked: false,
+} as const;
+
+/** Membership for something not yet resolved against the library. */
+const UNRESOLVED_MEMBERSHIP = { inLibrary: false } as const;
+
 function toTrack(track: SpotifyTrack): Track {
   return {
+    ...UNRESOLVED_MEMBERSHIP,
     id: track.id,
     name: track.name,
-    artistNames: track.artists.map((artist) => artist.name),
-    albumName: track.album.name,
+    artistNames: (track.artists ?? []).map((artist) => artist.name),
+    albumName: track.album?.name ?? null,
     durationMs: track.duration_ms,
     uri: track.uri,
   };
 }
 
 function toArtist(artist: SpotifyArtist): Artist {
-  return { id: artist.id, name: artist.name, genres: artist.genres, uri: artist.uri };
+  return {
+    ...UNRESOLVED_MEMBERSHIP,
+    ...UNCOUNTED_COVERAGE,
+    id: artist.id,
+    name: artist.name,
+    genres: artist.genres ?? [],
+    uri: artist.uri,
+    albumsWithLikedTracks: 0,
+    totalAlbumCount: null,
+  };
 }
 
 function toAlbum(album: SpotifyAlbum): Album {
   return {
+    ...UNRESOLVED_MEMBERSHIP,
+    ...UNCOUNTED_COVERAGE,
     id: album.id,
     name: album.name,
-    artistNames: album.artists.map((artist) => artist.name),
-    releaseDate: album.release_date,
+    artistNames: (album.artists ?? []).map((artist) => artist.name),
+    releaseDate: album.release_date ?? null,
     uri: album.uri,
+    // Unlike an artist's, an album's total is on the album object itself, so
+    // it costs nothing and never needs the resolver.
+    totalTrackCount: album.total_tracks ?? null,
   };
 }
 
@@ -64,6 +99,7 @@ function toAlbum(album: SpotifyAlbum): Album {
  */
 function toPlaylist(playlist: SpotifyPlaylist): Playlist {
   return {
+    ...UNRESOLVED_MEMBERSHIP,
     id: playlist.id,
     name: playlist.name,
     ownerName: playlist.owner?.display_name ?? playlist.owner?.id ?? UNKNOWN_OWNER_NAME,
@@ -85,6 +121,19 @@ function offsetPage<SpotifyItem, Item>(
     nextCursor: paging.next === null ? null : String(paging.offset + paging.items.length),
     total: paging.total,
   };
+}
+
+/**
+ * Mark everything on a page as being in the library.
+ *
+ * The library endpoints only ever return saved or followed things, so
+ * membership holds by construction and needs no call to confirm it. Applied
+ * at the page level rather than threaded through every mapper, because the
+ * fact belongs to *where the items came from*, not to the items themselves —
+ * the same artist object is `inLibrary: false` when it arrives from a search.
+ */
+function markAsInLibrary<Item extends { inLibrary: boolean }>(page: Page<Item>): Page<Item> {
+  return { ...page, items: page.items.map((item) => ({ ...item, inLibrary: true })) };
 }
 
 const emptyPage = <Item>(): Page<Item> => ({ items: [], nextCursor: null, total: 0 });
@@ -125,7 +174,7 @@ export class SpotifyProvider implements MediaProvider {
       limit: Math.min(options.limit ?? LIBRARY_MAX_LIMIT, LIBRARY_MAX_LIMIT),
       offset: options.cursor ? Number(options.cursor) : 0,
     });
-    return offsetPage(paging, (saved) => toTrack(saved.track));
+    return markAsInLibrary(offsetPage(paging, (saved) => toTrack(saved.track)));
   }
 
   async getSavedAlbums(options: { limit?: number; cursor?: string } = {}): Promise<Page<Album>> {
@@ -133,7 +182,7 @@ export class SpotifyProvider implements MediaProvider {
       limit: Math.min(options.limit ?? LIBRARY_MAX_LIMIT, LIBRARY_MAX_LIMIT),
       offset: options.cursor ? Number(options.cursor) : 0,
     });
-    return offsetPage(paging, (saved) => toAlbum(saved.album));
+    return markAsInLibrary(offsetPage(paging, (saved) => toAlbum(saved.album)));
   }
 
   async getFollowedArtists(
@@ -143,11 +192,11 @@ export class SpotifyProvider implements MediaProvider {
       limit: Math.min(options.limit ?? LIBRARY_MAX_LIMIT, LIBRARY_MAX_LIMIT),
       after: options.cursor,
     });
-    return {
+    return markAsInLibrary({
       items: result.artists.items.map(toArtist),
       nextCursor: result.artists.cursors.after,
       total: result.artists.total,
-    };
+    });
   }
 
   async getPlaylists(options: { limit?: number; cursor?: string } = {}): Promise<Page<Playlist>> {
@@ -155,7 +204,7 @@ export class SpotifyProvider implements MediaProvider {
       limit: Math.min(options.limit ?? LIBRARY_MAX_LIMIT, LIBRARY_MAX_LIMIT),
       offset: options.cursor ? Number(options.cursor) : 0,
     });
-    return offsetPage(paging, toPlaylist);
+    return markAsInLibrary(offsetPage(paging, toPlaylist));
   }
 
   async getPlaylistTracks(
@@ -168,4 +217,125 @@ export class SpotifyProvider implements MediaProvider {
     });
     return offsetPage(paging, (entry) => toTrack(entry.item));
   }
+
+  // --- Writes -------------------------------------------------------------
+
+  async addTracksToPlaylist(
+    playlistId: string,
+    uris: string[],
+    options: { position?: number } = {},
+  ): Promise<void> {
+    await this.client.addPlaylistItems(playlistId, uris, options);
+  }
+
+  async removeTracksFromPlaylist(playlistId: string, uris: string[]): Promise<void> {
+    await this.client.removePlaylistItems(playlistId, uris);
+  }
+
+  async createPlaylist(details: {
+    name: string;
+    description?: string;
+    isPublic?: boolean;
+  }): Promise<Playlist> {
+    const profile = await this.client.getCurrentUser();
+    const created = await this.client.createPlaylist(profile.id, {
+      name: details.name,
+      description: details.description,
+      public: details.isPublic,
+    });
+    if (created === null) {
+      throw new Error("Spotify accepted the playlist creation but returned no playlist.");
+    }
+    return toPlaylist(created);
+  }
+
+  async updatePlaylistDetails(
+    playlistId: string,
+    details: { name?: string; description?: string; isPublic?: boolean },
+  ): Promise<void> {
+    await this.client.updatePlaylistDetails(playlistId, {
+      name: details.name,
+      description: details.description,
+      public: details.isPublic,
+    });
+  }
+
+  async saveToLibrary(uris: string[]): Promise<void> {
+    await this.client.saveToLibrary(uris);
+  }
+
+  async removeFromLibrary(uris: string[]): Promise<void> {
+    await this.client.removeFromLibrary(uris);
+  }
+
+  // --- Playback -----------------------------------------------------------
+
+  async getCurrentlyPlaying(): Promise<NowPlaying | null> {
+    const state = await this.client.getCurrentlyPlaying();
+    if (state === null) {
+      return null;
+    }
+    return {
+      isPlaying: state.is_playing,
+      track: state.item === null ? null : toTrack(state.item),
+      progressMs: state.progress_ms,
+      deviceName: state.device?.name ?? null,
+    };
+  }
+
+  async listDevices(): Promise<Device[]> {
+    const { devices } = await this.client.getDevices();
+    return devices.map((device) => ({
+      id: device.id,
+      name: device.name,
+      type: device.type,
+      isActive: device.is_active,
+      isRestricted: device.is_restricted,
+      volumePercent: device.volume_percent,
+    }));
+  }
+
+  async play(options: { uri?: string; deviceId?: string } = {}): Promise<void> {
+    await this.client.play({
+      ...buildPlayTarget(options.uri),
+      deviceId: options.deviceId,
+    });
+  }
+
+  async pause(options: { deviceId?: string } = {}): Promise<void> {
+    await this.client.pause(options);
+  }
+
+  async skipToNext(options: { deviceId?: string } = {}): Promise<void> {
+    await this.client.skipToNext(options);
+  }
+
+  async skipToPrevious(options: { deviceId?: string } = {}): Promise<void> {
+    await this.client.skipToPrevious(options);
+  }
+
+  async transferPlayback(deviceId: string, options: { play?: boolean } = {}): Promise<void> {
+    await this.client.transferPlayback(deviceId, options);
+  }
 }
+
+/**
+ * Decide how a URI is sent to Spotify's play endpoint.
+ *
+ * A single track goes in `uris`; an album, artist or playlist goes in
+ * `context_uri`. Sending the wrong one fails, and it is the standard mistake
+ * with this endpoint, so the decision is made here from the URI itself rather
+ * than exposed as a parameter the caller has to get right.
+ *
+ * @param uri - A Spotify URI, or undefined to resume whatever is loaded.
+ * @returns The field the play endpoint expects for this URI type.
+ */
+function buildPlayTarget(uri: string | undefined): { contextUri?: string; uris?: string[] } {
+  if (uri === undefined) {
+    return {};
+  }
+  return uri.startsWith(TRACK_URI_PREFIX) ? { uris: [uri] } : { contextUri: uri };
+}
+
+/** Spotify URI prefix for a single track — the one type that plays via `uris`. */
+const TRACK_URI_PREFIX = "spotify:track:";

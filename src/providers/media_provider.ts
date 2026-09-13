@@ -12,31 +12,120 @@
  * cannot recur.
  */
 
-export type Track = {
+/**
+ * Every result type carries `uri` and `inLibrary`, in every tool that
+ * returns it.
+ *
+ * Uniformity is the point. A shape that gains a field in one tool and loses
+ * it in another forces the caller to know which tool produced a result before
+ * it can read it — and two results of the same kind stop being comparable or
+ * mergeable. So `inLibrary` is present even where it is knowable in advance:
+ * in a library listing it is `true` for every item by construction, which is
+ * redundant and costs nothing, and is far cheaper than a caller having to ask
+ * which shape it is holding.
+ *
+ * Fields still differ *between* types — an artist has no album — because
+ * forcing one shape across all four would mean nulls that never carry
+ * information.
+ */
+type LibraryMembership = {
+  /** Spotify URI, the identifier every write tool accepts. */
+  uri: string;
+  /**
+   * Whether this exact thing is saved to, or followed in, the library.
+   *
+   * For a track, saved. For an album, saved. For an artist, followed. For a
+   * playlist, followed or owned. Always `true` in library listings, where it
+   * holds by construction; resolved against the provider for search results,
+   * which mix both.
+   *
+   * Note this is **not** the same question as whether the library contains
+   * *anything by* an artist or *from* an album — 75 artists are followed
+   * while liked tracks span many hundreds more. That is `hasAnyLiked`.
+   */
+  inLibrary: boolean;
+};
+
+/**
+ * How much of a thing the library actually holds.
+ *
+ * A boolean is the wrong instrument here. "Do I have this album?" has a more
+ * useful answer than yes or no: *three of its twelve tracks*. Coverage says
+ * that; membership cannot.
+ *
+ * Numerators come from the cached liked tracks and are cheap. Denominators
+ * are not: Spotify publishes no total-tracks figure for an artist, so it
+ * means fetching every release and counting, which is roughly eleven requests
+ * for a band with ten albums — far past what a search can spend inside a
+ * Worker's fifty-subrequest budget.
+ *
+ * So a denominator is `null` until the background resolver has crawled that
+ * artist, and permanent once known. The numerator and `hasAnyLiked` are
+ * available immediately. A caller renders "3 liked" now and "3 / 12" later,
+ * rather than waiting on a crawl before showing anything.
+ */
+type LibraryCoverage = {
+  /** Liked tracks by or from this, counted from the cache. */
+  likedTrackCount: number;
+  /** Total tracks, or `null` until the resolver has counted them. */
+  totalTrackCount: number | null;
+  /**
+   * True when at least one track is liked — `likedTrackCount > 0`.
+   *
+   * Carried explicitly rather than left for the caller to derive, so the
+   * common question is answerable without arithmetic and without knowing
+   * whether a null denominator makes the ratio unreadable.
+   */
+  hasAnyLiked: boolean;
+};
+
+export type Track = LibraryMembership & {
   id: string;
   name: string;
   artistNames: string[];
-  albumName: string;
+  albumName: string | null;
   durationMs: number;
-  uri: string;
 };
 
-export type Artist = {
-  id: string;
-  name: string;
-  genres: string[];
-  uri: string;
-};
+export type Artist = LibraryMembership &
+  LibraryCoverage & {
+    id: string;
+    name: string;
+    genres: string[];
+    /**
+     * Albums with at least one liked track, over the artist's album count.
+     *
+     * A second coverage axis, because breadth and depth differ: forty liked
+     * tracks from one album is a different relationship to an artist than
+     * one track from each of forty albums, and `likedTrackCount` alone
+     * cannot tell them apart.
+     *
+     * Counts the artist's own albums and singles, excluding releases they
+     * merely appear on — a compilation of other artists' work would inflate
+     * the denominator with records that are not theirs.
+     */
+    albumsWithLikedTracks: number;
+    /** The artist's albums and singles, or `null` until the resolver counts them. */
+    totalAlbumCount: number | null;
+  };
 
-export type Album = {
-  id: string;
-  name: string;
-  artistNames: string[];
-  releaseDate: string;
-  uri: string;
-};
+/**
+ * An album.
+ *
+ * Unlike an artist, an album's `totalTrackCount` costs nothing — Spotify
+ * carries it on the album object itself — so it is populated immediately and
+ * is only null when the provider withheld it. The resolver never needs to
+ * crawl for it.
+ */
+export type Album = LibraryMembership &
+  LibraryCoverage & {
+    id: string;
+    name: string;
+    artistNames: string[];
+    releaseDate: string | null;
+  };
 
-export type Playlist = {
+export type Playlist = LibraryMembership & {
   id: string;
   name: string;
   ownerName: string;
@@ -50,7 +139,6 @@ export type Playlist = {
    * playlist. A caller needing the true count pages `getPlaylistTracks`.
    */
   trackCount: number | null;
-  uri: string;
 };
 
 export type SearchResults = {
@@ -122,7 +210,91 @@ export interface MediaProvider {
     playlistId: string,
     options?: { limit?: number; cursor?: string },
   ): Promise<Page<Track>>;
+
+  // --- Writes -------------------------------------------------------------
+  //
+  // Optional on the interface, not required. A provider that can only read —
+  // a local-folder reader, say — implements none of these, and the tool layer
+  // reports the capability as absent rather than a provider having to throw
+  // from a method it was forced to declare.
+
+  /** Add items to a playlist. */
+  addTracksToPlaylist?(
+    playlistId: string,
+    uris: string[],
+    options?: { position?: number },
+  ): Promise<void>;
+
+  /** Remove items from a playlist. Irreversible. */
+  removeTracksFromPlaylist?(playlistId: string, uris: string[]): Promise<void>;
+
+  /** Create a playlist, returning the created one. */
+  createPlaylist?(details: {
+    name: string;
+    description?: string;
+    isPublic?: boolean;
+  }): Promise<Playlist>;
+
+  /** Rename a playlist or change its description or visibility. */
+  updatePlaylistDetails?(
+    playlistId: string,
+    details: { name?: string; description?: string; isPublic?: boolean },
+  ): Promise<void>;
+
+  /** Save items to the library. */
+  saveToLibrary?(uris: string[]): Promise<void>;
+
+  /** Remove items from the library. Irreversible. */
+  removeFromLibrary?(uris: string[]): Promise<void>;
+
+  // --- Playback -----------------------------------------------------------
+
+  /** What is playing right now, or null when nothing is. */
+  getCurrentlyPlaying?(): Promise<NowPlaying | null>;
+
+  /** Every device playback can be sent to. */
+  listDevices?(): Promise<Device[]>;
+
+  /**
+   * Start or resume playback.
+   *
+   * @param uri - What to play. A track, album, artist or playlist URI; the
+   *   provider decides how each is sent. Absent resumes what is loaded.
+   */
+  play?(options?: { uri?: string; deviceId?: string }): Promise<void>;
+
+  /** Pause playback. */
+  pause?(options?: { deviceId?: string }): Promise<void>;
+
+  /** Skip to the next track. */
+  skipToNext?(options?: { deviceId?: string }): Promise<void>;
+
+  /** Skip to the previous track. */
+  skipToPrevious?(options?: { deviceId?: string }): Promise<void>;
+
+  /** Move playback to another device. */
+  transferPlayback?(deviceId: string, options?: { play?: boolean }): Promise<void>;
 }
+
+/** A device playback can be sent to. */
+export type Device = {
+  id: string | null;
+  name: string;
+  /** e.g. "Computer", "Smartphone", "Speaker". */
+  type: string;
+  isActive: boolean;
+  /** True when the device cannot accept Web API playback commands. */
+  isRestricted: boolean;
+  volumePercent: number | null;
+};
+
+/** What is playing right now. */
+export type NowPlaying = {
+  isPlaying: boolean;
+  track: Track | null;
+  progressMs: number | null;
+  deviceName: string | null;
+};
 
 /**
  * Fetch every page of a paginated call, following `nextCursor` until it is

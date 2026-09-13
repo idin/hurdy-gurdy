@@ -11,12 +11,25 @@
 const SPOTIFY_AUTHORIZE_URL = "https://accounts.spotify.com/authorize";
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
 
-/** Scopes this package's tools need, named for what each unlocks. */
+/**
+ * Scopes this package's tools need, named for what each unlocks.
+ *
+ * Adding a scope invalidates every existing authorization: a stored refresh
+ * token carries the scopes it was granted with, so a session created before a
+ * scope was added cannot use the tools that need it. Anyone upgrading past
+ * 0.2.0 has to reconnect once.
+ */
 export const SPOTIFY_SCOPES = [
   "user-library-read", // liked tracks, saved albums
+  "user-library-modify", // save_to_library, remove_from_library
   "user-follow-read", // followed artists
   "playlist-read-private", // the user's own and followed playlists
   "playlist-read-collaborative",
+  "playlist-modify-private", // editing a private playlist's items and details
+  "playlist-modify-public", // the same, for public playlists
+  "user-read-currently-playing", // get_currently_playing
+  "user-read-playback-state", // list_devices, and what is playing where
+  "user-modify-playback-state", // play, pause, skip, transfer_playback
 ] as const;
 
 /** A code_verifier: 43-128 characters from Spotify's allowed alphabet. */

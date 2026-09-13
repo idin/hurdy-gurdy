@@ -158,6 +158,9 @@ describe("SpotifyProvider.getLikedTracks", () => {
         albumName: "OK Computer",
         durationMs: 261973,
         uri: "spotify:track:track-1",
+        // A liked track IS the library for tracks — Liked Songs and saved
+        // tracks are the same store, so membership holds by construction.
+        inLibrary: true,
       },
     ]);
     expect(page.total).toBe(2);
@@ -196,6 +199,15 @@ describe("SpotifyProvider.getFollowedArtists", () => {
         name: "Rammstein",
         genres: ["neue deutsche härte", "industrial metal"],
         uri: "spotify:artist:artist-1",
+        // Followed, so in the library by construction.
+        inLibrary: true,
+        // Coverage counts need the cached liked tracks, which do not exist
+        // yet. The shape is final; only the values will change.
+        likedTrackCount: 0,
+        totalTrackCount: null,
+        hasAnyLiked: false,
+        albumsWithLikedTracks: 0,
+        totalAlbumCount: null,
       },
     ]);
     // Cursor-paginated, so the cursor is Spotify's own `after` value, not a
@@ -264,6 +276,10 @@ describe("SpotifyProvider.getPlaylistTracks", () => {
         albumName: "OK Computer",
         durationMs: 261973,
         uri: "spotify:track:track-1",
+        // FALSE, deliberately. A track in a playlist is not necessarily
+        // liked — playlist membership and library membership are independent
+        // in Spotify, so this endpoint cannot assume either way.
+        inLibrary: false,
       },
     ]);
   });
