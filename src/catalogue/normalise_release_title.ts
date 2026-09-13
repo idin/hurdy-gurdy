@@ -139,8 +139,26 @@ export function normaliseReleaseTitle(title: string): string {
     break;
   }
 
-  const cleaned = working.trim().toLowerCase();
+  const cleaned = stripLeadingArticle(working.trim().toLowerCase());
   return cleaned.length === 0 ? title.trim().toLowerCase() : cleaned;
+}
+
+/**
+ * Drop a leading definite article.
+ *
+ * Found on real data, 2026-09-13: `The Windmills of Your Mind` and
+ * `Windmills of Your Mind` were two keys for one song across four pressings
+ * in Idin's library. Catalogues disagree about the article constantly, and it
+ * never distinguishes two different recordings.
+ *
+ * Only `the`, and only leading. `A` and `An` are left alone because they
+ * genuinely separate titles — *A Day in the Life* is not *Day in the Life* —
+ * and a title that is nothing but the article keeps it rather than becoming
+ * an empty key.
+ */
+function stripLeadingArticle(title: string): string {
+  const stripped = title.replace(/^the\s+/, "");
+  return stripped.length === 0 ? title : stripped;
 }
 
 /**

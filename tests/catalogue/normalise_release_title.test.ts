@@ -33,7 +33,7 @@ describe("normaliseReleaseTitle", () => {
   });
 
   test("strips a bare Mix, which Pink Floyd uses where others write Remix", () => {
-    expect(normaliseReleaseTitle("The Wall (2025 Mix)")).toBe("the wall");
+    expect(normaliseReleaseTitle("The Wall (2025 Mix)")).toBe("wall");
   });
 
   test("strips Collector's Edition", () => {
@@ -44,7 +44,7 @@ describe("normaliseReleaseTitle", () => {
     // Real title, and the reason stripping runs more than once.
     expect(
       normaliseReleaseTitle("The Dark Side Of The Moon (50th Anniversary) [2023 Remaster]"),
-    ).toBe("the dark side of the moon");
+    ).toBe("dark side of the moon");
   });
 
   test("strips a dash-form suffix", () => {
@@ -81,7 +81,7 @@ describe("normaliseReleaseTitle", () => {
   });
 
   test("leaves an unadorned title alone but for case", () => {
-    expect(normaliseReleaseTitle("The Endless River")).toBe("the endless river");
+    expect(normaliseReleaseTitle("The Endless River")).toBe("endless river");
   });
 
   test("never returns an empty key", () => {
@@ -172,5 +172,30 @@ describe("buildWorkKey", () => {
     expect(buildWorkKey({ title: "Some Album", totalTracks: null })).not.toBe(
       buildWorkKey({ title: "Other Album", totalTracks: null }),
     );
+  });
+});
+
+describe("leading article", () => {
+  test("a leading The does not split one song into two keys", () => {
+    // Real: "The Windmills of Your Mind" and "Windmills of Your Mind" were
+    // two keys across four pressings in Idin's library.
+    expect(normaliseReleaseTitle("The Windmills of Your Mind")).toBe(
+      normaliseReleaseTitle("Windmills of Your Mind"),
+    );
+  });
+
+  test("A and An are kept, because they distinguish real titles", () => {
+    // "A Day in the Life" is not "Day in the Life".
+    expect(normaliseReleaseTitle("A Day in the Life")).not.toBe(
+      normaliseReleaseTitle("Day in the Life"),
+    );
+  });
+
+  test("a title that is only the article keeps it", () => {
+    expect(normaliseReleaseTitle("The")).toBe("the");
+  });
+
+  test("the is not stripped from inside a title", () => {
+    expect(normaliseReleaseTitle("Dark Side of the Moon")).toContain("of the moon");
   });
 });
