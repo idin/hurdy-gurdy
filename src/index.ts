@@ -11,6 +11,16 @@ import {
 } from "./confirmation";
 import { CachedMediaProvider } from "./cache/cached_media_provider";
 import {
+  findVersionsOfLikedSongs,
+  pinTrackVersion,
+  prepareMediaCache,
+  unpinTrackVersion,
+} from "./cache/media_cache_store";
+import {
+  describeUpgrades,
+  findVersionUpgrades,
+} from "./catalogue/find_best_versions";
+import {
   countPendingResolutions,
   findNextResolution,
 } from "./resolver/resolution_queue";
@@ -50,6 +60,15 @@ const LIBRARY_WRITE_ACTIONS = ["save", "remove"] as const;
  * same moment competes with it for the subrequest budget.
  */
 const RESOLVER_FIRST_TICK_SECONDS = 5;
+
+/**
+ * How many liked songs `find_better_versions` examines by default.
+ *
+ * Bounded because a long library would otherwise exceed the Worker's time
+ * budget on a single call, and because a report naming hundreds of moves is
+ * not read anyway.
+ */
+const DEFAULT_VERSION_SCAN_LIMIT = 300;
 
 /**
  * Every list tool shares the same two paging parameters, so the shape is
@@ -132,6 +151,7 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
     this.registerPlaylistWriteTools();
     this.registerLibraryWriteTools();
     this.registerPlaybackTools();
+    this.registerVersionTools();
 
     // Not awaited, and idempotent. Not awaited because a connection must not
     // wait on background work; idempotent because otherwise every restart of
@@ -707,6 +727,144 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
         const provider = await this.provider();
         await provider.transferPlayback!(device_id, { play });
         return { content: [{ type: "text" as const, text: `Moved playback to device ${device_id}.` }] };
+      },
+    );
+  }
+
+  /**
+   * Tools for album versions: finding better masters, and pinning.
+   *
+   * Only registered when a cache exists — every one of them reads the version
+   * tables, and a server with no D1 would offer tools that cannot answer.
+   */
+  private registerVersionTools() {
+    if (this.env.MEDIA_CACHE === undefined) {
+      return;
+    }
+
+    this.registerTool(
+      "find_better_versions",
+      {
+        description:
+          "Find liked tracks sitting on an older master than the best "
+          + "available version — an original where a remaster exists, say. "
+          + "Reports only; it never changes the library. Spotify lists every "
+          + "reissue separately, so likes drift across pressings of the same "
+          + "record over the years.\n\n"
+          + "Lists the individual moves when there are few and summarises "
+          + "when there are many. A pinned track is never proposed for a "
+          + "move.",
+        inputSchema: {
+          limit: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("How many liked songs to examine. Defaults to a few hundred."),
+        },
+      },
+      async ({ limit }) => {
+        const database = this.env.MEDIA_CACHE!;
+        await prepareMediaCache(database);
+        const rows = await findVersionsOfLikedSongs(database, {
+          limit: limit ?? DEFAULT_VERSION_SCAN_LIMIT,
+        });
+
+        const grouped = new Map(
+          [...rows].map(([songKey, versions]) => [
+            songKey,
+            versions.map((row) => ({
+              trackUri: row.track_uri,
+              songKey: row.song_key,
+              albumUri: row.album_uri ?? "",
+              releaseDate: row.release_date,
+              isLiked: row.is_liked === 1,
+              isPinned: row.is_pinned === 1,
+            })),
+          ]),
+        );
+
+        const names = new Map(
+          [...rows.values()]
+            .flat()
+            .map((row) => [
+              row.track_uri,
+              `${row.track_name} — ${row.album_name ?? "unknown album"}`
+                + `${row.release_date === null ? "" : ` (${row.release_date.slice(0, 4)})`}`,
+            ]),
+        );
+
+        const upgrades = findVersionUpgrades(grouped);
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: describeUpgrades(upgrades, (entry) => names.get(entry.trackUri) ?? entry.trackUri),
+            },
+          ],
+        };
+      },
+    );
+
+    this.registerTool(
+      "pin_best_version",
+      {
+        description:
+          "Mark one track as the best version of its song, overriding the "
+          + "automatic choice. The pin stays until it is removed: no newer "
+          + "remaster displaces it, and `find_better_versions` will never "
+          + "propose moving away from it. Use this wherever the automatic "
+          + "choice is wrong.",
+        inputSchema: {
+          track_uri: z.string().describe("The track to keep, e.g. spotify:track:..."),
+        },
+      },
+      async ({ track_uri }) => {
+        const database = this.env.MEDIA_CACHE!;
+        await prepareMediaCache(database);
+        const row = await database
+          .prepare(`SELECT song_key, name FROM track WHERE uri = ?`)
+          .bind(track_uri)
+          .first<{ song_key: string | null; name: string }>();
+
+        if (row === null || row.song_key === null) {
+          throw new Error(
+            `${track_uri} is not in the cache yet, so there is nothing to pin it against. `
+              + "Read the library or playlist holding it first.",
+          );
+        }
+
+        await pinTrackVersion(database, track_uri, row.song_key, Date.now());
+        return {
+          content: [
+            { type: "text" as const, text: `Pinned "${row.name}" as the best version of its song.` },
+          ],
+        };
+      },
+    );
+
+    this.registerTool(
+      "unpin_best_version",
+      {
+        description:
+          "Remove a pin, letting the automatic choice apply again — normally "
+          + "the most recent remaster.",
+        inputSchema: {
+          track_uri: z.string().describe("The track to unpin."),
+        },
+      },
+      async ({ track_uri }) => {
+        const database = this.env.MEDIA_CACHE!;
+        await prepareMediaCache(database);
+        const removed = await unpinTrackVersion(database, track_uri);
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: removed ? `Unpinned ${track_uri}.` : `${track_uri} was not pinned.`,
+            },
+          ],
+        };
       },
     );
   }

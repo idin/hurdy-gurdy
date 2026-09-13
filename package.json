@@ -1,6 +1,6 @@
 {
   "name": "hurdy-gurdy",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "An MCP server giving an agent real Spotify Web API access — full paginated library, following, and search — instead of the capped, fuzzy first-party connector.",
   "type": "module",
   "author": "Idin K",

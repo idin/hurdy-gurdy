@@ -290,3 +290,107 @@ export async function findPlaylistMembership(
     (results ?? []).map((row) => [row.track_uri, row.playlist_uris.split(",")]),
   );
 }
+
+/**
+ * Every known pressing of every song that has at least one liked version.
+ *
+ * Scoped to songs with a like because that is what the version finder acts
+ * on — it relocates existing likes rather than proposing new ones, so a song
+ * nobody has liked is not its business and would only make the scan larger.
+ *
+ * @param database - The bound D1 database.
+ * @param options.limit - Most songs to consider, so a first run over a long
+ *   library cannot exceed the Worker's time budget.
+ * @returns Pressings grouped by song key.
+ */
+export async function findVersionsOfLikedSongs(
+  database: D1Database,
+  options: { limit: number },
+): Promise<Map<string, SongVersionRow[]>> {
+  const { results } = await database
+    .prepare(
+      `SELECT t.uri        AS track_uri,
+              t.song_key   AS song_key,
+              t.album_uri  AS album_uri,
+              t.name       AS track_name,
+              a.name       AS album_name,
+              a.release_date AS release_date,
+              t.is_liked   AS is_liked,
+              CASE WHEN p.track_uri IS NULL THEN 0 ELSE 1 END AS is_pinned
+         FROM track AS t
+         LEFT JOIN album        AS a ON a.uri = t.album_uri
+         LEFT JOIN pinned_track AS p ON p.track_uri = t.uri
+        WHERE t.song_key IN (
+                SELECT song_key FROM track
+                 WHERE is_liked = 1 AND song_key IS NOT NULL
+                 LIMIT ?
+              )
+        ORDER BY t.song_key`,
+    )
+    .bind(options.limit)
+    .all<SongVersionRow>();
+
+  const grouped = new Map<string, SongVersionRow[]>();
+  for (const row of results ?? []) {
+    const existing = grouped.get(row.song_key);
+    if (existing === undefined) {
+      grouped.set(row.song_key, [row]);
+    } else {
+      existing.push(row);
+    }
+  }
+  return grouped;
+}
+
+/** One pressing, as the version query returns it. */
+export type SongVersionRow = {
+  track_uri: string;
+  song_key: string;
+  album_uri: string | null;
+  track_name: string;
+  album_name: string | null;
+  release_date: string | null;
+  is_liked: number;
+  is_pinned: number;
+};
+
+/**
+ * Pin a track as the best version of its song.
+ *
+ * @param database - The bound D1 database.
+ * @param trackUri - The pressing to keep.
+ * @param songKey - Which song it is the best version of.
+ * @param now - Epoch milliseconds.
+ */
+export async function pinTrackVersion(
+  database: D1Database,
+  trackUri: string,
+  songKey: string,
+  now: number,
+): Promise<void> {
+  await database
+    .prepare(
+      `INSERT INTO pinned_track (track_uri, song_key, pinned_at) VALUES (?, ?, ?)
+       ON CONFLICT(track_uri) DO UPDATE SET song_key = excluded.song_key`,
+    )
+    .bind(trackUri, songKey, now)
+    .run();
+}
+
+/**
+ * Remove a pin, letting the heuristics choose again.
+ *
+ * @param database - The bound D1 database.
+ * @param trackUri - The pressing to unpin.
+ * @returns Whether a pin was actually removed.
+ */
+export async function unpinTrackVersion(
+  database: D1Database,
+  trackUri: string,
+): Promise<boolean> {
+  const result = await database
+    .prepare(`DELETE FROM pinned_track WHERE track_uri = ?`)
+    .bind(trackUri)
+    .run();
+  return (result.meta.changes ?? 0) > 0;
+}
