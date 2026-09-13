@@ -270,37 +270,85 @@ export async function recordPlaylistTracks(
 }
 
 /**
- * Link tracks to the artists that made them, by name.
+ * Link tracks to the artists that made them, and record the album.
  *
- * A compromise, and worth naming as one: the shared `Track` shape carries
- * `artistNames` but no artist URIs, because names are what a caller wants to
- * read. So a link can only be made to an artist already recorded under that
- * name. An artist nobody has seen yet is skipped, and the link appears once a
- * later read records them.
+ * Uses the artist URI the provider sent, not the display name. Matching by
+ * name was the first attempt and was wrong twice over: a name is not an
+ * identity — two artists share one, one artist appears under several — and it
+ * could only link to artists already recorded, so any artist not yet followed
+ * lost every link silently. Spotify sends `artists: [{ id, name }]` on every
+ * track; the mapper simply had to stop discarding it.
  *
- * The alternative — widening `Track` to carry artist URIs — is the better fix
- * and belongs with the resolver work, where identity stops being a name.
+ * Artists met this way are recorded as **not followed**, which is the honest
+ * default: appearing on a liked track says nothing about whether the user
+ * follows them, and `recordArtists` only ever raises that flag.
  *
  * @param database - Where to write.
- * @param tracks - Tracks whose artists should be linked.
+ * @param tracks - Tracks whose artists and album should be linked.
+ * @param options.now - Epoch milliseconds.
  */
-export async function linkTracksToKnownArtists(
+export async function linkTrackRelations(
   database: D1Database,
   tracks: Track[],
+  options: { now: number },
 ): Promise<void> {
   if (tracks.length === 0) {
     return;
   }
-  const statements = tracks.flatMap((track) =>
-    track.artistNames.map((artistName) =>
+
+  const statements: D1PreparedStatement[] = [];
+
+  // An artist row must exist before a link can point at it, and a track met
+  // on a liked page is often by someone the user does not follow.
+  const seenArtists = new Map<string, string>();
+  for (const track of tracks) {
+    for (const artist of track.artists) {
+      seenArtists.set(artist.uri, artist.name);
+    }
+  }
+  for (const [uri, name] of seenArtists) {
+    statements.push(
       database
         .prepare(
-          `INSERT OR IGNORE INTO track_artist (track_uri, artist_uri)
-             SELECT ?, uri FROM artist WHERE name = ?`,
+          `INSERT INTO artist (uri, id, name, genres, is_followed, cached_at)
+             VALUES (?, ?, ?, '[]', 0, ?)
+           ON CONFLICT(uri) DO UPDATE SET name = excluded.name`,
         )
-        .bind(track.uri, artistName),
-    ),
-  );
+        .bind(uri, uri.split(":").pop() ?? uri, name, options.now),
+    );
+  }
+
+  for (const track of tracks) {
+    for (const artist of track.artists) {
+      statements.push(
+        database
+          .prepare(`INSERT OR IGNORE INTO track_artist (track_uri, artist_uri) VALUES (?, ?)`)
+          .bind(track.uri, artist.uri),
+      );
+    }
+    if (track.albumUri !== null) {
+      statements.push(
+        database
+          .prepare(`UPDATE track SET album_uri = ? WHERE uri = ?`)
+          .bind(track.albumUri, track.uri),
+      );
+      // A stub album, so the coverage view has a row to group by. A real one
+      // from getSavedAlbums will fill in the rest without clobbering this.
+      statements.push(
+        database
+          .prepare(
+            `INSERT OR IGNORE INTO album (uri, id, name, release_date, total_tracks, is_saved, cached_at)
+               VALUES (?, ?, ?, NULL, NULL, 0, ?)`,
+          )
+          .bind(
+            track.albumUri,
+            track.albumUri.split(":").pop() ?? track.albumUri,
+            track.albumName ?? "",
+            options.now,
+          ),
+      );
+    }
+  }
 
   await runQuietly(database, statements);
 }

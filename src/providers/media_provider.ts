@@ -82,8 +82,20 @@ type LibraryCoverage = {
 export type Track = LibraryMembership & {
   id: string;
   name: string;
+  /**
+   * The track's artists, in the provider's own order.
+   *
+   * Carries the URI as well as the name because a name is not an identity:
+   * two artists share one, one artist appears under several, and matching by
+   * name silently drops links for anyone not already recorded. The provider
+   * sends the identity, so it is kept rather than discarded on the way past.
+   */
+  artists: { uri: string; name: string }[];
+  /** Display names, in the same order as `artists`. */
   artistNames: string[];
   albumName: string | null;
+  /** The album this track belongs to, when the provider said. */
+  albumUri: string | null;
   durationMs: number;
 };
 

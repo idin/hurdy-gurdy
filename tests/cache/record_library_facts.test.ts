@@ -5,7 +5,7 @@ import { CachedMediaProvider } from "../../src/cache/cached_media_provider";
 import { prepareMediaCache } from "../../src/cache/media_cache_store";
 import {
   forgetLikedTracks,
-  linkTracksToKnownArtists,
+  linkTrackRelations,
   recordArtists,
   recordTracks,
 } from "../../src/cache/record_library_facts";
@@ -24,14 +24,20 @@ import type { Artist, MediaProvider, Page, Track } from "../../src/providers/med
 const database = (env as { MEDIA_CACHE: D1Database }).MEDIA_CACHE;
 const NOW = Date.parse("2026-09-13T12:00:00Z");
 
-function track(uri: string, name: string, artistNames: string[]): Track {
+function track(
+  uri: string,
+  name: string,
+  artists: { uri: string; name: string }[],
+): Track {
   return {
     uri,
     inLibrary: true,
     id: uri.split(":").pop()!,
     name,
-    artistNames,
+    artists,
+    artistNames: artists.map((entry) => entry.name),
     albumName: "Meddle",
+    albumUri: "spotify:album:meddle",
     durationMs: 1,
   };
 }
@@ -68,7 +74,7 @@ beforeEach(async () => {
 
 describe("recordTracks", () => {
   test("a liked track is recorded as liked", async () => {
-    await recordTracks(database, [track("spotify:track:t1", "Echoes", ["Pink Floyd"])], {
+    await recordTracks(database, [track("spotify:track:t1", "Echoes", [{ uri: "spotify:artist:pf", name: "Pink Floyd" }])], {
       isLiked: true,
       now: NOW,
     });
@@ -131,10 +137,10 @@ describe("linkTracksToKnownArtists", () => {
       isFollowed: true,
       now: NOW,
     });
-    const tracks = [track("spotify:track:t1", "Echoes", ["Pink Floyd"])];
+    const tracks = [track("spotify:track:t1", "Echoes", [{ uri: "spotify:artist:pf", name: "Pink Floyd" }])];
     await recordTracks(database, tracks, { isLiked: true, now: NOW });
 
-    await linkTracksToKnownArtists(database, tracks);
+    await linkTrackRelations(database, tracks, { now: NOW });
 
     const row = await database
       .prepare(`SELECT COUNT(*) AS count FROM track_artist`)
@@ -150,10 +156,10 @@ describe("linkTracksToKnownArtists", () => {
       [artist("spotify:artist:a", "Artist A"), artist("spotify:artist:b", "Artist B")],
       { isFollowed: true, now: NOW },
     );
-    const tracks = [track("spotify:track:t1", "A Collaboration", ["Artist A", "Artist B"])];
+    const tracks = [track("spotify:track:t1", "A Collaboration", [{ uri: "spotify:artist:a", name: "Artist A" }, { uri: "spotify:artist:b", name: "Artist B" }])];
     await recordTracks(database, tracks, { isLiked: true, now: NOW });
 
-    await linkTracksToKnownArtists(database, tracks);
+    await linkTrackRelations(database, tracks, { now: NOW });
 
     const row = await database
       .prepare(`SELECT COUNT(*) AS count FROM track_artist WHERE track_uri = 'spotify:track:t1'`)
@@ -161,16 +167,32 @@ describe("linkTracksToKnownArtists", () => {
     expect(row?.count).toBe(2);
   });
 
-  test("an artist nobody has recorded is skipped, not invented", async () => {
-    const tracks = [track("spotify:track:t1", "Echoes", ["Nobody Knows Them"])];
+  test("links an artist nobody had recorded yet, rather than dropping it", async () => {
+    // This replaces a test that asserted the opposite. Linking used to match
+    // on display name and could only reach artists already recorded, so every
+    // track by an unfollowed artist lost its link silently — which is most of
+    // a 2,282-track library. Spotify sends the artist id on every track; the
+    // mapper was discarding it.
+    const tracks = [
+      track("spotify:track:t1", "Echoes", [
+        { uri: "spotify:artist:unfollowed", name: "Someone Unfollowed" },
+      ]),
+    ];
     await recordTracks(database, tracks, { isLiked: true, now: NOW });
 
-    await linkTracksToKnownArtists(database, tracks);
+    await linkTrackRelations(database, tracks, { now: NOW });
 
-    const row = await database
+    const link = await database
       .prepare(`SELECT COUNT(*) AS count FROM track_artist`)
       .first<{ count: number }>();
-    expect(row?.count).toBe(0);
+    expect(link?.count).toBe(1);
+
+    // Recorded as NOT followed: appearing on a liked track says nothing
+    // about whether the user follows them.
+    const artistRow = await database
+      .prepare(`SELECT is_followed FROM artist WHERE uri = 'spotify:artist:unfollowed'`)
+      .first<{ is_followed: number }>();
+    expect(artistRow?.is_followed).toBe(0);
   });
 });
 
@@ -186,8 +208,8 @@ describe("end to end: reading a library produces real coverage", () => {
       async getLikedTracks(): Promise<Page<Track>> {
         return {
           items: [
-            track("spotify:track:t1", "Echoes", ["Pink Floyd"]),
-            track("spotify:track:t2", "One of These Days", ["Pink Floyd"]),
+            track("spotify:track:t1", "Echoes", [{ uri: "spotify:artist:pf", name: "Pink Floyd" }]),
+            track("spotify:track:t2", "One of These Days", [{ uri: "spotify:artist:pf", name: "Pink Floyd" }]),
           ],
           nextCursor: null,
           total: 2,
@@ -219,5 +241,36 @@ describe("end to end: reading a library produces real coverage", () => {
 
     expect(page.items[0].likedTrackCount).toBe(0);
     expect(page.items[0].hasAnyLiked).toBe(false);
+  });
+
+  test("an unfollowed artist still gets real coverage from liked tracks", async () => {
+    // The case the name-matching version got wrong, and the common one: most
+    // of a 2,282-track library is by artists the user has never followed.
+    // Their coverage must still count.
+    const provider = {
+      name: "spotify",
+      async getLikedTracks(): Promise<Page<Track>> {
+        return {
+          items: [
+            track("spotify:track:t1", "A Song", [
+              { uri: "spotify:artist:never-followed", name: "Never Followed" },
+            ]),
+          ],
+          nextCursor: null,
+          total: 1,
+        };
+      },
+    } as unknown as MediaProvider;
+
+    await new CachedMediaProvider(provider, database, () => NOW).getLikedTracks();
+
+    const row = await database
+      .prepare(
+        `SELECT liked_track_count, has_any_liked FROM artist_coverage
+           WHERE artist_uri = 'spotify:artist:never-followed'`,
+      )
+      .first<{ liked_track_count: number; has_any_liked: number }>();
+    expect(row?.liked_track_count).toBe(1);
+    expect(row?.has_any_liked).toBe(1);
   });
 });

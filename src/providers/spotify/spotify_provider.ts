@@ -50,12 +50,18 @@ const UNCOUNTED_COVERAGE = {
 const UNRESOLVED_MEMBERSHIP = { inLibrary: false } as const;
 
 function toTrack(track: SpotifyTrack): Track {
+  const artists = (track.artists ?? []).map((artist) => ({
+    uri: `spotify:artist:${artist.id}`,
+    name: artist.name,
+  }));
   return {
     ...UNRESOLVED_MEMBERSHIP,
     id: track.id,
     name: track.name,
-    artistNames: (track.artists ?? []).map((artist) => artist.name),
+    artists,
+    artistNames: artists.map((artist) => artist.name),
     albumName: track.album?.name ?? null,
+    albumUri: track.album?.id === undefined ? null : `spotify:album:${track.album.id}`,
     durationMs: track.duration_ms,
     uri: track.uri,
   };

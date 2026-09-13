@@ -41,7 +41,7 @@ import {
 } from "./media_cache_store";
 import {
   forgetLikedTracks,
-  linkTracksToKnownArtists,
+  linkTrackRelations,
   recordAlbums,
   recordArtists,
   recordPlaylistTracks,
@@ -198,7 +198,7 @@ export class CachedMediaProvider implements MediaProvider {
     // Recorded on every read, cache hit included: the rows are what the
     // coverage views count, and a hit still needs them present.
     await recordTracks(this.database, page.items, { isLiked: true, now: this.now() });
-    await linkTracksToKnownArtists(this.database, page.items);
+    await linkTrackRelations(this.database, page.items, { now: this.now() });
     return page;
   }
 
@@ -239,7 +239,7 @@ export class CachedMediaProvider implements MediaProvider {
     await recordPlaylistTracks(this.database, `spotify:playlist:${playlistId}`, page, {
       now: this.now(),
     });
-    await linkTracksToKnownArtists(this.database, page.items);
+    await linkTrackRelations(this.database, page.items, { now: this.now() });
     return page;
   }
 
