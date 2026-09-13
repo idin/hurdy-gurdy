@@ -16,6 +16,15 @@ export const SEARCH_MAX_LIMIT = 10;
 export const LIBRARY_MAX_LIMIT = 50;
 
 /**
+ * The maximum `limit` `/artists/{id}/albums` accepts.
+ *
+ * Ten, not fifty. Found by trying it against the live API on 2026-09-13 —
+ * the documentation still says fifty, and 20 and 50 both fail with
+ * `400 Invalid limit`. This is why an artist's track total needs a crawl.
+ */
+export const ARTIST_ALBUMS_MAX_LIMIT = 10;
+
+/**
  * Most items one `POST /playlists/{id}/items` call accepts.
  *
  * Spotify's own documented cap, not a chosen number: "A maximum of 100 items
@@ -437,6 +446,31 @@ export class SpotifyApiClient {
   /** GET /v1/me/player/currently-playing. Scope: user-read-currently-playing. */
   async getCurrentlyPlaying(): Promise<SpotifyPlaybackState | null> {
     return this.get("/me/player/currently-playing", {});
+  }
+
+  /**
+   * GET /v1/artists/{id}/albums — an artist's own releases.
+   *
+   * **Caps at ten per page**, unlike the library endpoints' fifty. Verified
+   * on the live API 2026-09-13: `limit=20` and `limit=50` both return
+   * `400 Invalid limit`, while `limit=10` returns 200. The published
+   * documentation still says 50, so this is a development-mode restriction
+   * found by trying it.
+   *
+   * @param artistId - The artist.
+   * @param options.includeGroups - Which release types, comma-separated.
+   *   Defaults to the artist's own albums and singles, excluding records they
+   *   merely appear on.
+   */
+  async getArtistAlbums(
+    artistId: string,
+    options: { limit?: number; offset?: number; includeGroups?: string } = {},
+  ): Promise<SpotifyPagingObject<SpotifyAlbum>> {
+    return this.get(`/artists/${artistId}/albums`, {
+      include_groups: options.includeGroups ?? "album,single",
+      limit: Math.min(options.limit ?? ARTIST_ALBUMS_MAX_LIMIT, ARTIST_ALBUMS_MAX_LIMIT),
+      offset: options.offset,
+    });
   }
 
   /**

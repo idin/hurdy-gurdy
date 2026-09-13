@@ -140,6 +140,25 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
 
   `CREATE INDEX IF NOT EXISTS playlist_track_by_track ON playlist_track (track_uri)`,
 
+  // --- Resolver work -------------------------------------------------------
+  //
+  // Declared here rather than in the resolver so there is exactly one place
+  // that creates tables. Its shape and reasoning live in
+  // `resolver/resolution_queue.ts`.
+  `CREATE TABLE IF NOT EXISTS resolution_queue (
+     kind         TEXT NOT NULL,
+     subject_uri  TEXT NOT NULL,
+     priority     INTEGER NOT NULL,
+     cursor       TEXT,
+     accumulated  INTEGER NOT NULL DEFAULT 0,
+     attempts     INTEGER NOT NULL DEFAULT 0,
+     enqueued_at  INTEGER NOT NULL,
+     PRIMARY KEY (kind, subject_uri)
+   )`,
+
+  `CREATE INDEX IF NOT EXISTS resolution_queue_drain_order
+     ON resolution_queue (priority, enqueued_at)`,
+
   // --- Derived ------------------------------------------------------------
   //
   // Never stored. Each is computed from the tables above on read, so no
