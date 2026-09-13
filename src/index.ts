@@ -10,6 +10,13 @@ import {
   isValidConfirmation,
 } from "./confirmation";
 import { CachedMediaProvider } from "./cache/cached_media_provider";
+import {
+  countPendingResolutions,
+  findNextResolution,
+} from "./resolver/resolution_queue";
+import { runResolutionTask } from "./resolver/resolve_artist_totals";
+import { findNextTickDelay } from "./resolver/resolver_schedule";
+import { isSpotifyRateLimited, SpotifyApiClient } from "./providers/spotify/spotify_api_client";
 import { SpotifyProvider } from "./providers/spotify/spotify_provider";
 import {
   LIBRARY_WRITE_MAX_ITEMS,
@@ -35,6 +42,14 @@ const TRANSPORT_ACTIONS = ["pause", "resume", "next", "previous"] as const;
 
 /** What modify_library can do. */
 const LIBRARY_WRITE_ACTIONS = ["save", "remove"] as const;
+
+/**
+ * Seconds before the resolver's first tick after a connection.
+ *
+ * Not zero: a connection is already doing work, and starting a crawl in the
+ * same moment competes with it for the subrequest budget.
+ */
+const RESOLVER_FIRST_TICK_SECONDS = 5;
 
 /**
  * Every list tool shares the same two paging parameters, so the shape is
@@ -117,6 +132,66 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
     this.registerPlaylistWriteTools();
     this.registerLibraryWriteTools();
     this.registerPlaybackTools();
+
+    // Not awaited, and idempotent. Not awaited because a connection must not
+    // wait on background work; idempotent because otherwise every restart of
+    // the Durable Object stacks another schedule — other-memory exhausted a
+    // GitHub rate limit within an hour of getting that wrong.
+    if (this.env.MEDIA_CACHE !== undefined) {
+      await this.schedule(RESOLVER_FIRST_TICK_SECONDS, "continueResolving", undefined, {
+        idempotent: true,
+      });
+    }
+  }
+
+  /**
+   * Drain one item of resolver work, then reschedule.
+   *
+   * Named as a real method because `schedule` takes a `keyof this`, so this
+   * cannot be a private closure.
+   *
+   * Never throws. It runs from an alarm, where an escaping error means the
+   * alarm retries — and work failing for a durable reason would retry
+   * forever. A failure is recorded against the task instead, and three of
+   * them stop it being selected.
+   */
+  async continueResolving(): Promise<void> {
+    const database = this.env.MEDIA_CACHE;
+    if (database === undefined) {
+      return;
+    }
+
+    let rateLimited = false;
+    try {
+      const task = await findNextResolution(database);
+      if (task !== null) {
+        const accessToken = await getAccessToken(
+          this.env.SPOTIFY_TOKENS,
+          this.props?.spotifyUserId ?? "",
+          { clientId: this.env.SPOTIFY_CLIENT_ID, now: () => Date.now() },
+        );
+        await runResolutionTask(database, new SpotifyApiClient(accessToken), task);
+      }
+    } catch (error) {
+      // A rate-limited resolver is making no progress, and ticking again
+      // immediately spends the quota it is waiting on.
+      rateLimited = isSpotifyRateLimited(error);
+    }
+
+    let hasWork = false;
+    try {
+      hasWork = (await countPendingResolutions(database)).pending > 0;
+    } catch {
+      // Unknown is treated as idle: a resolver that cannot read its own queue
+      // should back off rather than spin.
+    }
+
+    await this.schedule(
+      findNextTickDelay({ hasWork, rateLimited }),
+      "continueResolving",
+      undefined,
+      { idempotent: true },
+    );
   }
 
   private registerSearchTool() {

@@ -62,6 +62,7 @@ beforeEach(async () => {
   // counts depend on test order.
   for (const table of [
     "cached_response",
+    "resolution_queue",
     "track_artist",
     "album_artist",
     "playlist_track",

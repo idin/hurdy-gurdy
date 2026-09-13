@@ -9,6 +9,7 @@ import {
   recordArtists,
   recordTracks,
 } from "../../src/cache/record_library_facts";
+import { RESOLUTION_PRIORITY } from "../../src/resolver/resolution_queue";
 import type { Artist, MediaProvider, Page, Track } from "../../src/providers/media_provider";
 
 /**
@@ -61,6 +62,7 @@ beforeEach(async () => {
   await prepareMediaCache(database);
   for (const table of [
     "cached_response",
+    "resolution_queue",
     "track_artist",
     "playlist_track",
     "track",
@@ -272,5 +274,77 @@ describe("end to end: reading a library produces real coverage", () => {
       .first<{ liked_track_count: number; has_any_liked: number }>();
     expect(row?.liked_track_count).toBe(1);
     expect(row?.has_any_liked).toBe(1);
+  });
+});
+
+describe("queuing denominator work", () => {
+  test("reading followed artists queues their totals at the followed tier", async () => {
+    const provider = {
+      name: "spotify",
+      async getFollowedArtists(): Promise<Page<Artist>> {
+        return { items: [artist("spotify:artist:pf", "Pink Floyd")], nextCursor: null, total: 1 };
+      },
+    } as unknown as MediaProvider;
+
+    await new CachedMediaProvider(provider, database, () => NOW).getFollowedArtists();
+
+    const { results } = await database
+      .prepare(`SELECT kind, priority FROM resolution_queue ORDER BY kind`)
+      .all<{ kind: string; priority: number }>();
+    expect(results?.map((row) => row.kind)).toEqual([
+      "artist-album-count",
+      "artist-track-count",
+    ]);
+    expect(results?.every((row) => row.priority === RESOLUTION_PRIORITY.FOLLOWED_ARTIST)).toBe(true);
+  });
+
+  test("an artist already resolved is not queued again", async () => {
+    // Without this a library re-read re-queues every artist every time, and
+    // the queue never empties.
+    await database
+      .prepare(
+        `INSERT INTO artist VALUES ('spotify:artist:pf','pf','Pink Floyd','[]',1,120,10,?)`,
+      )
+      .bind(NOW)
+      .run();
+    const provider = {
+      name: "spotify",
+      async getFollowedArtists(): Promise<Page<Artist>> {
+        return { items: [artist("spotify:artist:pf", "Pink Floyd")], nextCursor: null, total: 1 };
+      },
+    } as unknown as MediaProvider;
+
+    await new CachedMediaProvider(provider, database, () => NOW).getFollowedArtists();
+
+    const row = await database
+      .prepare(`SELECT COUNT(*) AS count FROM resolution_queue`)
+      .first<{ count: number }>();
+    expect(row?.count).toBe(0);
+  });
+
+  test("an artist met on a liked track is queued below a followed one", async () => {
+    const provider = {
+      name: "spotify",
+      async getLikedTracks(): Promise<Page<Track>> {
+        return {
+          items: [
+            track("spotify:track:t1", "A Song", [
+              { uri: "spotify:artist:unfollowed", name: "Never Followed" },
+            ]),
+          ],
+          nextCursor: null,
+          total: 1,
+        };
+      },
+    } as unknown as MediaProvider;
+
+    await new CachedMediaProvider(provider, database, () => NOW).getLikedTracks();
+
+    const row = await database
+      .prepare(
+        `SELECT priority FROM resolution_queue WHERE subject_uri = 'spotify:artist:unfollowed' LIMIT 1`,
+      )
+      .first<{ priority: number }>();
+    expect(row?.priority).toBe(RESOLUTION_PRIORITY.HAS_LIKED_TRACKS);
   });
 });

@@ -127,7 +127,8 @@ function countingProvider(overrides: Partial<MediaProvider> = {}) {
 
 beforeEach(async () => {
   await prepareMediaCache(database);
-  for (const table of ["cached_response", "track_artist", "playlist_track", "track", "album", "artist"]) {
+  for (const table of ["cached_response",
+    "resolution_queue", "track_artist", "playlist_track", "track", "album", "artist"]) {
     await database.prepare(`DELETE FROM ${table}`).run();
   }
 });

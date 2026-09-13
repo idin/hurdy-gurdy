@@ -40,6 +40,11 @@ import {
   storeCachedResponse,
 } from "./media_cache_store";
 import {
+  enqueueResolutions,
+  RESOLUTION_PRIORITY,
+  type ResolutionPriority,
+} from "../resolver/resolution_queue";
+import {
   forgetLikedTracks,
   linkTrackRelations,
   recordAlbums,
@@ -172,6 +177,56 @@ export class CachedMediaProvider implements MediaProvider {
     }
   }
 
+  /**
+   * Queue the denominator work for artists that have been seen.
+   *
+   * Only for artists whose totals are still unknown, so a library re-read
+   * does not re-queue thousands of already-resolved artists every time.
+   *
+   * Both kinds are queued together: the album count is one request and lands
+   * almost immediately, while the track count crawls for as long as the
+   * artist is prolific. Queuing only the cheap one would leave the expensive
+   * denominator permanently null.
+   *
+   * Never fails a read. A missing denominator is a smaller cost than a failed
+   * question.
+   */
+  private async queueArtistTotals(
+    artistUris: string[],
+    priority: ResolutionPriority,
+  ): Promise<void> {
+    if (artistUris.length === 0) {
+      return;
+    }
+    try {
+      const placeholders = artistUris.map(() => "?").join(",");
+      const { results } = await this.database
+        .prepare(
+          `SELECT uri FROM artist
+             WHERE uri IN (${placeholders})
+               AND (total_album_count IS NULL OR total_track_count IS NULL)`,
+        )
+        .bind(...artistUris)
+        .all<{ uri: string }>();
+
+      const unresolved = (results ?? []).map((row) => row.uri);
+      if (unresolved.length === 0) {
+        return;
+      }
+
+      await enqueueResolutions(
+        this.database,
+        unresolved.flatMap((uri) => [
+          { kind: "artist-album-count" as const, subjectUri: uri, priority },
+          { kind: "artist-track-count" as const, subjectUri: uri, priority },
+        ]),
+        this.now(),
+      );
+    } catch {
+      // The queue is an optimisation for a number nobody is waiting on.
+    }
+  }
+
   // --- Reads ---------------------------------------------------------------
 
   async search(
@@ -184,6 +239,14 @@ export class CachedMediaProvider implements MediaProvider {
     playlists: Page<Playlist>;
   }> {
     const results = await this.inner.search(query, options);
+    await recordArtists(this.database, results.artists.items, {
+      isFollowed: false,
+      now: this.now(),
+    });
+    await this.queueArtistTotals(
+      results.artists.items.map((artist) => artist.uri),
+      RESOLUTION_PRIORITY.ASKED_FOR,
+    );
     const [artists, albums] = await Promise.all([
       this.fillArtistCoverage(results.artists),
       this.fillAlbumCoverage(results.albums),
@@ -199,6 +262,10 @@ export class CachedMediaProvider implements MediaProvider {
     // coverage views count, and a hit still needs them present.
     await recordTracks(this.database, page.items, { isLiked: true, now: this.now() });
     await linkTrackRelations(this.database, page.items, { now: this.now() });
+    await this.queueArtistTotals(
+      [...new Set(page.items.flatMap((track) => track.artists.map((artist) => artist.uri)))],
+      RESOLUTION_PRIORITY.HAS_LIKED_TRACKS,
+    );
     return page;
   }
 
@@ -209,6 +276,10 @@ export class CachedMediaProvider implements MediaProvider {
       this.inner.getFollowedArtists(options),
     );
     await recordArtists(this.database, page.items, { isFollowed: true, now: this.now() });
+    await this.queueArtistTotals(
+      page.items.map((artist) => artist.uri),
+      RESOLUTION_PRIORITY.FOLLOWED_ARTIST,
+    );
     return this.fillArtistCoverage(page);
   }
 
