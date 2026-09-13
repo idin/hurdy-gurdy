@@ -12,6 +12,7 @@ import {
   LIBRARY_MAX_LIMIT,
   SEARCH_MAX_LIMIT,
   SpotifyApiClient,
+  isNoActiveDevice,
   type SpotifyAlbum,
   type SpotifyArtist,
   type SpotifyPagingObject,
@@ -341,11 +342,48 @@ export class SpotifyProvider implements MediaProvider {
     }));
   }
 
+  /**
+   * Start or resume playback, waking a device when none is active.
+   *
+   * Spotify fails a device-less `play` with `404 NO_ACTIVE_DEVICE` whenever
+   * nothing is currently active — even when devices exist and are listed,
+   * which is the normal state once nobody has played anything for a while.
+   * Observed live on 2026-09-13: five devices listed, `play` refused, and the
+   * same call with an explicit `device_id` worked and made that device
+   * active.
+   *
+   * Failing there would be faithful to Spotify and useless to the caller,
+   * who must then list devices, choose one, and retry — to reach a state it
+   * never asked to care about. So that one error is retried once against a
+   * device chosen here.
+   *
+   * Restricted devices are skipped: Spotify marks those as unable to accept
+   * Web API commands, so targeting one trades this error for another.
+   */
   async play(options: { uri?: string; deviceId?: string } = {}): Promise<void> {
-    await this.client.play({
-      ...buildPlayTarget(options.uri),
-      deviceId: options.deviceId,
-    });
+    const target = buildPlayTarget(options.uri);
+    try {
+      await this.client.play({ ...target, deviceId: options.deviceId });
+      return;
+    } catch (error) {
+      // An explicit device was asked for, or the failure was something else:
+      // either way this is not ours to recover from.
+      if (options.deviceId !== undefined || !isNoActiveDevice(error)) {
+        throw error;
+      }
+    }
+
+    const { devices } = await this.client.getDevices();
+    const usable = devices.find((device) => device.id !== null && !device.is_restricted);
+    if (usable === undefined) {
+      throw new Error(
+        "No Spotify device is active, and none that can be woken was found. "
+          + "Open Spotify on a phone, computer or speaker and try again — a "
+          + "device only appears here once its app has run recently.",
+      );
+    }
+
+    await this.client.play({ ...target, deviceId: usable.id ?? undefined });
   }
 
   async pause(options: { deviceId?: string } = {}): Promise<void> {

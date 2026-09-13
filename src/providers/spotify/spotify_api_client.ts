@@ -142,6 +142,24 @@ export function isSpotifyRateLimited(error: unknown): boolean {
   return error instanceof SpotifyApiError && error.status === 429;
 }
 
+/** Spotify's own reason string for a playback command with no device to run it on. */
+const NO_ACTIVE_DEVICE_REASON = "NO_ACTIVE_DEVICE";
+
+/**
+ * Whether a playback command failed only because nothing was active.
+ *
+ * Matched on the reason string as well as the status, because `404` from this
+ * API also means an ordinary missing resource, and retrying *that* against a
+ * woken device would be wrong.
+ */
+export function isNoActiveDevice(error: unknown): boolean {
+  return (
+    error instanceof SpotifyApiError
+    && error.status === 404
+    && error.message.includes(NO_ACTIVE_DEVICE_REASON)
+  );
+}
+
 /**
  * A thin client for the Spotify Web API, authenticated with one access
  * token.
