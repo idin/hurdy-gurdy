@@ -207,6 +207,24 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
 
   `CREATE INDEX IF NOT EXISTS song_plays_track_name ON song_plays (track_name)`,
 
+  /*
+   * Per-user monthly budget on uncached work.
+   *
+   * Counts what leaves the building — a Spotify call, a resolver crawl — and
+   * deliberately not cache reads. A user who reads the same artist a hundred
+   * times costs one upstream fetch, and charging for a hundred would punish
+   * exactly the behaviour the cache exists to encourage.
+   *
+   * Reasoning in `quota/fetch_budget.ts`.
+   */
+  `CREATE TABLE IF NOT EXISTS fetch_budget (
+     user_id     TEXT NOT NULL,
+     period      TEXT NOT NULL,
+     spent       INTEGER NOT NULL DEFAULT 0,
+     updated_at  INTEGER NOT NULL,
+     PRIMARY KEY (user_id, period)
+   )`,
+
   // --- Resolver work -------------------------------------------------------
   //
   // Declared here rather than in the resolver so there is exactly one place

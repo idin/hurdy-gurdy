@@ -10,6 +10,7 @@ import {
   isValidConfirmation,
 } from "./confirmation";
 import { CachedMediaProvider } from "./cache/cached_media_provider";
+import { checkFetchBudget, MONTHLY_FETCH_BUDGET } from "./quota/fetch_budget";
 import {
   findVersionsOfLikedSongs,
   pinTrackVersion,
@@ -116,9 +117,18 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
       now: () => Date.now(),
     });
     const spotify = new SpotifyProvider(accessToken);
-    return this.env.MEDIA_CACHE === undefined
-      ? spotify
-      : new CachedMediaProvider(spotify, this.env.MEDIA_CACHE);
+    if (this.env.MEDIA_CACHE === undefined) {
+      return spotify;
+    }
+    // The Spotify user id is the budget key. On a single-user deployment
+    // there is nobody to bill, but keying it anyway means opening the server
+    // to others is a configuration change rather than a code change.
+    return new CachedMediaProvider(
+      spotify,
+      this.env.MEDIA_CACHE,
+      () => Date.now(),
+      this.props.spotifyUserId,
+    );
   }
 
   /**
@@ -977,6 +987,45 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
 
         const report = await this.applyVersionUpgrades(provider, database, upgrades);
         return { content: [{ type: "text" as const, text: report }] };
+      },
+    );
+
+    this.registerTool(
+      "get_usage",
+      {
+        description:
+          "How much of this month's uncached-lookup budget has been used, "
+          + "and how much work the background resolver still has queued.\n\n"
+          + "Only lookups that leave the server are counted — a Spotify call, "
+          + "a resolver crawl. Anything served from the cache is free however "
+          + "often it is asked for, which is why a heavily-used library can "
+          + "show a low number.",
+        inputSchema: {},
+      },
+      async () => {
+        const database = this.env.MEDIA_CACHE!;
+        await prepareMediaCache(database);
+        const budget = await checkFetchBudget(
+          database,
+          this.props?.spotifyUserId ?? "",
+          Date.now(),
+        );
+        const queue = await countPendingResolutions(database);
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text:
+                `Period ${budget.period}\n`
+                + `  uncached lookups used: ${budget.spent} of ${MONTHLY_FETCH_BUDGET}\n`
+                + `  remaining: ${budget.remaining}\n\n`
+                + `Background resolver\n`
+                + `  queued: ${queue.pending}\n`
+                + `  stuck after repeated failures: ${queue.stuck}`,
+            },
+          ],
+        };
       },
     );
 

@@ -31,6 +31,11 @@ import type {
   SearchType,
   Track,
 } from "../providers/media_provider";
+import {
+  checkFetchBudget,
+  describeBudgetRefusal,
+  recordFetchSpend,
+} from "../quota/fetch_budget";
 import { buildCacheKey } from "./cache_entry";
 import {
   findAlbumCoverage,
@@ -71,11 +76,50 @@ export class CachedMediaProvider implements MediaProvider {
   private readonly database: D1Database;
   private readonly now: Clock;
 
-  constructor(inner: MediaProvider, database: D1Database, now: Clock = () => Date.now()) {
+  /**
+   * Whose budget uncached work is charged to.
+   *
+   * Null on a single-user deployment, where there is nobody to bill and the
+   * check is pure overhead. Passing a user id is what turns the budget on.
+   */
+  private readonly userId: string | null;
+
+  constructor(
+    inner: MediaProvider,
+    database: D1Database,
+    now: Clock = () => Date.now(),
+    userId: string | null = null,
+  ) {
     this.inner = inner;
     this.database = database;
     this.now = now;
     this.name = inner.name;
+    this.userId = userId;
+  }
+
+  /**
+   * Refuse if this user has spent their month's uncached work.
+   *
+   * Called only on a cache **miss**, which is the whole point: a cache hit
+   * costs nothing upstream and must stay free however often it is asked for.
+   * Charging for hits would punish exactly the behaviour the cache exists to
+   * encourage.
+   */
+  private async requireBudget(): Promise<void> {
+    if (this.userId === null) {
+      return;
+    }
+    const verdict = await checkFetchBudget(this.database, this.userId, this.now());
+    if (!verdict.allowed) {
+      throw new Error(describeBudgetRefusal(verdict));
+    }
+  }
+
+  /** Charge one uncached fetch, after it happened. */
+  private async chargeFetch(): Promise<void> {
+    if (this.userId !== null) {
+      await recordFetchSpend(this.database, this.userId, 1, this.now());
+    }
   }
 
   /**
@@ -106,7 +150,11 @@ export class CachedMediaProvider implements MediaProvider {
       // broken one.
     }
 
+    // A miss is about to cost an upstream call, so this is where the budget
+    // applies. A hit never reaches here.
+    await this.requireBudget();
     const page = await fetchPage();
+    await this.chargeFetch();
 
     try {
       await storeCachedResponse(
