@@ -19,7 +19,9 @@ import {
 import {
   describeUpgrades,
   findVersionUpgrades,
+  MAXIMUM_UPGRADES_TO_LIST,
 } from "./catalogue/find_best_versions";
+import { forgetLikedTracks } from "./cache/record_library_facts";
 import {
   countPendingResolutions,
   findNextResolution,
@@ -807,6 +809,143 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
     );
 
     this.registerTool(
+      "migrate_to_better_versions",
+      {
+        description:
+          "Move likes onto the best available master: unlike the old track, "
+          + "like the new one, and swap it in every playlist that holds it.\n\n"
+          + "IRREVERSIBLE. Unliking loses the track's original added-at date, "
+          + "so its place in the library cannot be restored even by liking it "
+          + "again, and Spotify offers no undo. Call once without `confirm` "
+          + "to see exactly what would move and receive a token, then again "
+          + "with that token. The token authorises that one exact set of "
+          + "moves and cannot be replayed against a different one.\n\n"
+          + "Run `find_better_versions` first to see the full picture. A "
+          + "pinned track is never moved.",
+        inputSchema: {
+          track_uris: z
+            .array(z.string())
+            .optional()
+            .describe(
+              "Which liked tracks to move. Omit to move every one the finder "
+              + "identifies, up to the scan limit.",
+            ),
+          limit: z
+            .number()
+            .int()
+            .positive()
+            .optional()
+            .describe("How many liked songs to examine when track_uris is omitted."),
+          confirm: z
+            .string()
+            .optional()
+            .describe("The token from the dry run. Omit for the dry run itself."),
+        },
+      },
+      async ({ track_uris, limit, confirm }) => {
+        const database = this.env.MEDIA_CACHE!;
+        const provider = await this.requireWrites();
+        await prepareMediaCache(database);
+
+        const rows = await findVersionsOfLikedSongs(database, {
+          limit: limit ?? DEFAULT_VERSION_SCAN_LIMIT,
+        });
+        const grouped = new Map(
+          [...rows].map(([songKey, versions]) => [
+            songKey,
+            versions.map((row) => ({
+              trackUri: row.track_uri,
+              songKey: row.song_key,
+              albumUri: row.album_uri ?? "",
+              releaseDate: row.release_date,
+              isLiked: row.is_liked === 1,
+              isPinned: row.is_pinned === 1,
+            })),
+          ]),
+        );
+
+        const wanted = track_uris === undefined ? null : new Set(track_uris);
+        const upgrades = findVersionUpgrades(grouped).filter(
+          (upgrade) => wanted === null || wanted.has(upgrade.from.trackUri),
+        );
+
+        if (upgrades.length === 0) {
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "Nothing to move — every liked track examined is already on its best version.",
+              },
+            ],
+          };
+        }
+
+        const names = new Map(
+          [...rows.values()].flat().map((row) => [
+            row.track_uri,
+            `${row.track_name} — ${row.album_name ?? "unknown album"}`
+              + `${row.release_date === null ? "" : ` (${row.release_date.slice(0, 4)})`}`,
+          ]),
+        );
+
+        // The operation is keyed on the exact moves, so a token issued for one
+        // set cannot authorise a different one — including a set that changed
+        // between the dry run and the confirmation because something was liked
+        // in between.
+        const operation = describeOperation(
+          "migrate_to_better_versions",
+          "library",
+          upgrades.map((upgrade) => `${upgrade.from.trackUri}>${upgrade.to.trackUri}`),
+        );
+        const secret = this.env.COOKIE_ENCRYPTION_KEY;
+        const now = Date.now();
+
+        if (confirm === undefined) {
+          const token = await issueConfirmationToken(secret, operation, now);
+          const lines = upgrades
+            .slice(0, MAXIMUM_UPGRADES_TO_LIST)
+            .map(
+              (upgrade) =>
+                `  ${names.get(upgrade.from.trackUri) ?? upgrade.from.trackUri}\n`
+                + `    -> ${names.get(upgrade.to.trackUri) ?? upgrade.to.trackUri}`,
+            );
+          const elided =
+            upgrades.length > MAXIMUM_UPGRADES_TO_LIST
+              ? `\n  ... and ${upgrades.length - MAXIMUM_UPGRADES_TO_LIST} more`
+              : "";
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text:
+                  `DRY RUN — nothing has been changed.\n\n`
+                  + `${upgrades.length} like(s) would move:\n\n`
+                  + lines.join("\n")
+                  + elided
+                  + `\n\nEach move unlikes the old track, likes the new one, and `
+                  + `replaces it in any playlist holding it. Unliking is `
+                  + `irreversible — the original added-at date is lost.\n\n`
+                  + `To proceed, call again with confirm="${token}".`,
+              },
+            ],
+          };
+        }
+
+        if (!(await isValidConfirmation(secret, operation, confirm, now))) {
+          throw new Error(
+            "That confirmation token does not authorise these moves. A token is tied "
+              + "to one exact set of moves and expires after about ten minutes. Re-run "
+              + "the dry run to get a fresh one — and note the set changes if anything "
+              + "was liked or unliked in the meantime.",
+          );
+        }
+
+        const report = await this.applyVersionUpgrades(provider, database, upgrades);
+        return { content: [{ type: "text" as const, text: report }] };
+      },
+    );
+
+    this.registerTool(
       "pin_best_version",
       {
         description:
@@ -867,6 +1006,63 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
         };
       },
     );
+  }
+
+  /**
+   * Carry out the moves, one song at a time.
+   *
+   * Ordered deliberately: **like the new track before unliking the old one.**
+   * If the process dies between the two, the outcome is a duplicate like,
+   * which is tidy-up. The reverse order risks losing the like entirely, which
+   * is data loss Spotify cannot undo.
+   *
+   * A failure on one song does not abandon the rest — a half-finished
+   * migration that reports which half finished is more useful than one that
+   * stops silently partway.
+   */
+  private async applyVersionUpgrades(
+    provider: MediaProvider,
+    database: D1Database,
+    upgrades: { from: { trackUri: string }; to: { trackUri: string } }[],
+  ): Promise<string> {
+    const moved: string[] = [];
+    const failed: string[] = [];
+
+    for (const upgrade of upgrades) {
+      try {
+        await provider.saveToLibrary!([upgrade.to.trackUri]);
+        await provider.removeFromLibrary!([upgrade.from.trackUri]);
+
+        // Playlists holding the old pressing get the new one in its place.
+        const { results } = await database
+          .prepare(`SELECT playlist_uri FROM playlist_track WHERE track_uri = ?`)
+          .bind(upgrade.from.trackUri)
+          .all<{ playlist_uri: string }>();
+
+        for (const row of results ?? []) {
+          const playlistId = row.playlist_uri.split(":").pop() ?? row.playlist_uri;
+          await provider.addTracksToPlaylist!(playlistId, [upgrade.to.trackUri]);
+          await provider.removeTracksFromPlaylist!(playlistId, [upgrade.from.trackUri]);
+        }
+
+        // The cache is updated so coverage is right immediately rather than
+        // after the next library read.
+        await forgetLikedTracks(database, [upgrade.from.trackUri]);
+        await database
+          .prepare(`UPDATE track SET is_liked = 1 WHERE uri = ?`)
+          .bind(upgrade.to.trackUri)
+          .run();
+
+        moved.push(upgrade.to.trackUri);
+      } catch (error) {
+        failed.push(`${upgrade.from.trackUri}: ${(error as Error).message}`);
+      }
+    }
+
+    const summary = `Moved ${moved.length} like(s) onto a better version.`;
+    return failed.length === 0
+      ? summary
+      : `${summary}\n\n${failed.length} failed:\n` + failed.map((line) => `  ${line}`).join("\n");
   }
 
   /**
