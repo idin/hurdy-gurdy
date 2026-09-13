@@ -49,12 +49,39 @@ anything is refetched.
 1. **ETag / `If-None-Match`.** Every cached response stores its ETag. A
    revalidation that returns `304 Not Modified` costs no quota and renews the
    entry. This is the common case.
+
+   **Verified against the live API on 2026-09-13**, not assumed:
+   `GET /v1/me/playlists?limit=1` returned
+   `etag: "MC-ImFiM2ZhNzNlYjI2YjQ1N2U0NmM0ZTI4MzA3ZDQ2ZTk1Ig=="`, and the
+   same request carrying that value as `If-None-Match` returned **304**.
+   The whole design leans on this, so it was tested before being written
+   down.
 2. **Collection totals.** `GET /me/following?limit=1` returns the collection's
    `total` without fetching any pages. A changed total means the collection is
    stale. **This is what catches "I followed a new artist"** without walking
    the whole list.
 3. **Sliding TTL.** The floor. Nothing is trusted forever, even if no signal
    says it changed.
+
+### What none of these catch
+
+Stated plainly rather than left for someone to discover.
+
+A **same-size swap** — unfollowing one artist and following another — leaves
+the collection total identical, so signal 2 misses it entirely. Signal 1
+still catches it if that page is revalidated, because the page's content
+changed and so does its ETag.
+
+The real gap is narrower: **a change to a page nobody reads is not noticed
+until someone reads it.** A track added to page 4 of the liked-tracks list
+goes unseen while only page 1 is being revalidated. Spotify publishes no
+change feed and no modified-since parameter, so there is no cheap signal
+that closes this. The 66-day TTL is the backstop, and a caller who needs
+certainty right now can force a refetch.
+
+This is a deliberate trade, not an oversight: closing it would mean walking
+every page of every collection on a schedule, which is exactly the
+quota-burning behaviour the cache exists to avoid.
 
 ## Sliding expiry, precisely
 
