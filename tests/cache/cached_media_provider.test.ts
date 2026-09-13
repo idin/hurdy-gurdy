@@ -198,11 +198,11 @@ describe("coverage from the cache", () => {
       .bind(NOW)
       .run();
     await database
-      .prepare(`INSERT INTO album VALUES ('spotify:album:meddle','m','Meddle','1971',6,0,?)`)
+      .prepare(`INSERT INTO album (uri, id, name, release_date, total_tracks, is_saved, cached_at) VALUES ('spotify:album:meddle','m','Meddle','1971',6,0,?)`)
       .bind(NOW)
       .run();
     await database
-      .prepare(`INSERT INTO track VALUES ('spotify:track:t1','t1','Echoes','spotify:album:meddle',1,1,NULL,?)`)
+      .prepare(`INSERT INTO track (uri, id, name, album_uri, duration_ms, is_liked, liked_at, cached_at) VALUES ('spotify:track:t1','t1','Echoes','spotify:album:meddle',1,1,NULL,?)`)
       .bind(NOW)
       .run();
     await database
@@ -231,7 +231,7 @@ describe("coverage from the cache", () => {
     // and blindly spreading coverage over the item would replace a real
     // figure from the provider with a null.
     await database
-      .prepare(`INSERT INTO album VALUES ('spotify:album:meddle','m','Meddle','1971',NULL,1,?)`)
+      .prepare(`INSERT INTO album (uri, id, name, release_date, total_tracks, is_saved, cached_at) VALUES ('spotify:album:meddle','m','Meddle','1971',NULL,1,?)`)
       .bind(NOW)
       .run();
 

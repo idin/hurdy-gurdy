@@ -18,6 +18,7 @@
  * something they asked for against something they did not.
  */
 
+import { buildSongKey, buildWorkKey } from "../catalogue/normalise_release_title";
 import type { Album, Artist, Page, Playlist, Track } from "../providers/media_provider";
 
 /**
@@ -81,17 +82,26 @@ export async function recordTracks(
     statements.push(
       database
         .prepare(
-          `INSERT INTO track (uri, id, name, album_uri, duration_ms, is_liked, cached_at)
-             VALUES (?, ?, ?, NULL, ?, ?, ?)
+          `INSERT INTO track (uri, id, name, album_uri, duration_ms, is_liked, song_key, cached_at)
+             VALUES (?, ?, ?, NULL, ?, ?, ?, ?)
            ON CONFLICT(uri) DO UPDATE SET
              name = excluded.name,
              duration_ms = excluded.duration_ms,
              -- MAX, not excluded: a track met again in a playlist must not
              -- erase the fact that it is liked.
              is_liked = MAX(track.is_liked, excluded.is_liked),
+             song_key = excluded.song_key,
              cached_at = excluded.cached_at`,
         )
-        .bind(track.uri, track.id, track.name, track.durationMs, liked, options.now),
+        .bind(
+          track.uri,
+          track.id,
+          track.name,
+          track.durationMs,
+          liked,
+          buildSongKey({ title: track.name, durationMs: track.durationMs }),
+          options.now,
+        ),
     );
   }
 
@@ -118,8 +128,8 @@ export async function recordAlbums(
   const statements = albums.map((album) =>
     database
       .prepare(
-        `INSERT INTO album (uri, id, name, release_date, total_tracks, is_saved, cached_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO album (uri, id, name, release_date, total_tracks, is_saved, work_key, cached_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(uri) DO UPDATE SET
            name = excluded.name,
            release_date = excluded.release_date,
@@ -127,6 +137,7 @@ export async function recordAlbums(
            -- erase a real figure recorded from a full one.
            total_tracks = COALESCE(excluded.total_tracks, album.total_tracks),
            is_saved = MAX(album.is_saved, excluded.is_saved),
+           work_key = excluded.work_key,
            cached_at = excluded.cached_at`,
       )
       .bind(
@@ -136,6 +147,7 @@ export async function recordAlbums(
         album.releaseDate,
         album.totalTrackCount,
         saved,
+        buildWorkKey({ title: album.name, totalTracks: album.totalTrackCount }),
         options.now,
       ),
   );
@@ -337,13 +349,16 @@ export async function linkTrackRelations(
       statements.push(
         database
           .prepare(
-            `INSERT OR IGNORE INTO album (uri, id, name, release_date, total_tracks, is_saved, cached_at)
-               VALUES (?, ?, ?, NULL, NULL, 0, ?)`,
+            `INSERT OR IGNORE INTO album (uri, id, name, release_date, total_tracks, is_saved, work_key, cached_at)
+               VALUES (?, ?, ?, NULL, NULL, 0, ?, ?)`,
           )
           .bind(
             track.albumUri,
             track.albumUri.split(":").pop() ?? track.albumUri,
             track.albumName ?? "",
+            // A stub has no track count yet, so its key carries "unknown" and
+            // will not merge until a real album read supplies the count.
+            buildWorkKey({ title: track.albumName ?? "", totalTracks: null }),
             options.now,
           ),
       );

@@ -191,3 +191,38 @@ export function buildWorkKey(release: {
   const count = release.totalTracks === null ? "unknown" : String(release.totalTracks);
   return `${normaliseReleaseTitle(release.title)}|${liveness}|${count}`;
 }
+
+/**
+ * How many seconds two recordings may differ by and still be one song.
+ *
+ * Masters of the same recording differ by a second or two — fade lengths and
+ * gap trimming move between pressings. Genuinely different recordings differ
+ * by much more.
+ *
+ * The case this must not merge is real and Idin's: *Detroit Rock City* exists
+ * as a long version opening with a radio and car engines, and a short one
+ * that is just the music. Those are two different tracks. Five seconds is
+ * comfortably below that gap and comfortably above master drift.
+ */
+export const SAME_SONG_DURATION_TOLERANCE_SECONDS = 5;
+
+/**
+ * The key two recordings share when they are the same song.
+ *
+ * Duration is part of the identity, not incidental — see the tolerance above.
+ * It is bucketed rather than compared, because a key has to be equal or not:
+ * two recordings within the tolerance of each other but on opposite sides of
+ * a bucket boundary would not match, so the bucket is coarse enough that the
+ * boundary case is rare and the pin exists for when it happens.
+ *
+ * @param track.title - The recording's title.
+ * @param track.durationMs - Its length.
+ * @returns A key equal for two recordings that are one song.
+ */
+export function buildSongKey(track: { title: string; durationMs: number }): string {
+  const seconds = Math.round(track.durationMs / MILLISECONDS_PER_SECOND);
+  const bucket = Math.round(seconds / SAME_SONG_DURATION_TOLERANCE_SECONDS);
+  return `${normaliseReleaseTitle(track.title)}|${bucket}`;
+}
+
+const MILLISECONDS_PER_SECOND = 1000;

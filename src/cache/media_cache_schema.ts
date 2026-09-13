@@ -61,8 +61,15 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
      -- When the like happened, as the provider reported it. Null for tracks
      -- seen in a playlist or a search rather than in the liked library.
      liked_at     TEXT,
+     -- Groups a track with the same song on another master. Includes the
+     -- duration bucket, because Detroit Rock City exists as a long version
+     -- opening with a radio and car engines and a short one that is just the
+     -- music — two different tracks, and merging them would lose that.
+     song_key     TEXT,
      cached_at    INTEGER NOT NULL
    )`,
+
+  `CREATE INDEX IF NOT EXISTS track_song_key ON track (song_key)`,
 
   `CREATE INDEX IF NOT EXISTS track_album ON track (album_uri)`,
   `CREATE INDEX IF NOT EXISTS track_is_liked ON track (is_liked)`,
@@ -92,8 +99,15 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
      -- rather than one we count. Null when the provider withheld it.
      total_tracks  INTEGER,
      is_saved      INTEGER NOT NULL DEFAULT 0,
+     -- Groups an album with its other masters. Computed on write from the
+     -- normalised title, liveness and track count, so a remaster and its
+     -- original share one. Every version keeps its own row; only the views
+     -- merge them.
+     work_key      TEXT,
      cached_at     INTEGER NOT NULL
    )`,
+
+  `CREATE INDEX IF NOT EXISTS album_work_key ON album (work_key)`,
 
   `CREATE TABLE IF NOT EXISTS album_artist (
      album_uri   TEXT NOT NULL,
@@ -139,6 +153,23 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
    )`,
 
   `CREATE INDEX IF NOT EXISTS playlist_track_by_track ON playlist_track (track_uri)`,
+
+  /*
+   * A track the user has pinned as the best version of its song.
+   *
+   * The one thing here that is stated rather than derived: a pin is Idin's
+   * preference, and nothing infers it. It overrides every heuristic — a newer
+   * remaster does not displace a pinned track, and re-running the finder does
+   * not clear it. This is the escape hatch that lets the matching rules stay
+   * simple, because any case they get wrong can be settled by hand.
+   */
+  `CREATE TABLE IF NOT EXISTS pinned_track (
+     track_uri  TEXT PRIMARY KEY,
+     song_key   TEXT NOT NULL,
+     pinned_at  INTEGER NOT NULL
+   )`,
+
+  `CREATE INDEX IF NOT EXISTS pinned_track_song ON pinned_track (song_key)`,
 
   // --- Resolver work -------------------------------------------------------
   //
@@ -205,6 +236,71 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
      LEFT JOIN track_artist ON track_artist.artist_uri = artist.uri
      LEFT JOIN track        ON track.uri = track_artist.track_uri
      GROUP BY artist.uri, artist.total_track_count, artist.total_album_count`,
+
+  /*
+   * One row per album work, pooling every master of it.
+   *
+   * This is what stops a remaster counting twice. A like on the original and
+   * a like on the 2018 remix are two likes of one album, not one like of each
+   * of two — and the numerator is a DISTINCT count over `song_key`, so liking
+   * the *same* song on both masters counts once.
+   *
+   * The canonical version is the most recent release, which is the newest
+   * master and what Spotify itself surfaces first.
+   */
+  `CREATE VIEW IF NOT EXISTS album_work AS
+     SELECT
+       album.work_key                                       AS work_key,
+       MIN(album.name)                                      AS name,
+       MAX(album.release_date)                              AS latest_release_date,
+       COUNT(DISTINCT album.uri)                            AS version_count,
+       MAX(album.total_tracks)                              AS total_track_count,
+       MAX(CASE WHEN album.is_saved = 1 THEN 1 ELSE 0 END)  AS is_saved
+     FROM album
+     WHERE album.work_key IS NOT NULL
+     GROUP BY album.work_key`,
+
+  /*
+   * Coverage over a work rather than over one pressing.
+   *
+   * `COUNT(DISTINCT track.song_key)` is the union Idin asked for: every liked
+   * song across every master, counted once each. Without DISTINCT, liking the
+   * same song on two remasters would read as two liked tracks.
+   */
+  `CREATE VIEW IF NOT EXISTS work_coverage AS
+     SELECT
+       album.work_key                                        AS work_key,
+       COUNT(DISTINCT CASE WHEN track.is_liked = 1
+                           THEN COALESCE(track.song_key, track.uri) END)
+                                                             AS liked_track_count,
+       MAX(album.total_tracks)                               AS total_track_count,
+       CASE WHEN COUNT(CASE WHEN track.is_liked = 1 THEN 1 END) > 0
+            THEN 1 ELSE 0 END                                AS has_any_liked
+     FROM album
+     LEFT JOIN track ON track.album_uri = album.uri
+     WHERE album.work_key IS NOT NULL
+     GROUP BY album.work_key`,
+
+  /*
+   * Which works count toward an artist's metrics.
+   *
+   * Idin's ruling on live records: when a work exists as both live and
+   * studio, the live one is ignored — it is mostly the same songs again, and
+   * counting it inflates the artist's totals. When only a live version
+   * exists, it counts.
+   *
+   * The work key carries liveness in its second field, so the studio twin of
+   * a live work is the same key with `|live|` replaced by `|studio|`.
+   */
+  `CREATE VIEW IF NOT EXISTS countable_work AS
+     SELECT work_key
+       FROM album_work AS this
+      WHERE this.work_key NOT LIKE '%|live|%'
+         OR NOT EXISTS (
+              SELECT 1 FROM album_work AS twin
+               WHERE twin.work_key =
+                     REPLACE(this.work_key, '|live|', '|studio|')
+            )`,
 
   /*
    * Which playlists hold each track, as a comma-joined list of URIs.
