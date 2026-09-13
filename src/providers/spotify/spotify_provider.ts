@@ -161,12 +161,18 @@ export class SpotifyProvider implements MediaProvider {
 
     const result = await this.client.search(query, [...types], { limit, offset });
 
-    return {
-      tracks: result.tracks ? offsetPage(result.tracks, toTrack) : emptyPage(),
-      artists: result.artists ? offsetPage(result.artists, toArtist) : emptyPage(),
-      albums: result.albums ? offsetPage(result.albums, toAlbum) : emptyPage(),
-      playlists: result.playlists ? offsetPage(result.playlists, toPlaylist) : emptyPage(),
-    };
+    // One contains-call per type rather than one per page overall: the four
+    // pages are separate objects, and merging them to save three requests
+    // would mean re-splitting the answers by position afterwards.
+    const [tracks, artists, albums, playlists] = await Promise.all([
+      this.resolveMembership(result.tracks ? offsetPage(result.tracks, toTrack) : emptyPage<Track>()),
+      this.resolveMembership(result.artists ? offsetPage(result.artists, toArtist) : emptyPage<Artist>()),
+      this.resolveMembership(result.albums ? offsetPage(result.albums, toAlbum) : emptyPage<Album>()),
+      this.resolveMembership(
+        result.playlists ? offsetPage(result.playlists, toPlaylist) : emptyPage<Playlist>(),
+      ),
+    ]);
+    return { tracks, artists, albums, playlists };
   }
 
   async getLikedTracks(options: { limit?: number; cursor?: string } = {}): Promise<Page<Track>> {
@@ -266,6 +272,46 @@ export class SpotifyProvider implements MediaProvider {
 
   async removeFromLibrary(uris: string[]): Promise<void> {
     await this.client.removeFromLibrary(uris);
+  }
+
+  /**
+   * Fill in `inLibrary` for a page of results, in one request.
+   *
+   * Search returns a mix of things the user has and things they do not, and
+   * `/me/library/contains` answers every type at once — so the flag costs one
+   * request per page rather than one per item or one per type.
+   *
+   * A failure here returns the page unchanged rather than propagating: an
+   * unknown membership flag is a missing nicety, and failing the whole search
+   * over it would be worse than the flag being false.
+   */
+  private async resolveMembership<Item extends { uri: string; inLibrary: boolean }>(
+    page: Page<Item>,
+  ): Promise<Page<Item>> {
+    if (page.items.length === 0) {
+      return page;
+    }
+    try {
+      const contained = await this.client.checkLibraryContains(page.items.map((item) => item.uri));
+      return {
+        ...page,
+        items: page.items.map((item, index) => ({ ...item, inLibrary: contained[index] ?? false })),
+      };
+    } catch {
+      return page;
+    }
+  }
+
+  async getQueue(): Promise<{ nowPlaying: Track | null; queue: Track[] }> {
+    const state = await this.client.getQueue();
+    return {
+      nowPlaying: state.currently_playing === null ? null : toTrack(state.currently_playing),
+      queue: (state.queue ?? []).map(toTrack),
+    };
+  }
+
+  async addToQueue(uri: string, options: { deviceId?: string } = {}): Promise<void> {
+    await this.client.addToQueue(uri, options);
   }
 
   // --- Playback -----------------------------------------------------------

@@ -432,6 +432,41 @@ export class SpotifyApiClient {
     return this.get("/me", {});
   }
 
+  /**
+   * GET /v1/me/library/contains — which of these URIs are in the library.
+   *
+   * One call answers every type at once — tracks, albums, artists and
+   * playlists mixed freely — which is what makes an in-library flag on search
+   * results affordable. Verified against the live API on 2026-09-13: the
+   * older per-type `/me/tracks/contains` and `/me/following/contains` return
+   * 403 for Client IDs created after November 2024, while this one works.
+   *
+   * @param uris - URIs to check, in order.
+   * @returns One boolean per URI, positionally matching the input.
+   */
+  async checkLibraryContains(uris: string[]): Promise<boolean[]> {
+    return this.get("/me/library/contains", { uris: uris.join(",") });
+  }
+
+  /** GET /v1/me/player/queue — what is playing next. Scope: user-read-playback-state. */
+  async getQueue(): Promise<{ currently_playing: SpotifyTrack | null; queue: SpotifyTrack[] }> {
+    return this.get("/me/player/queue", {});
+  }
+
+  /**
+   * POST /v1/me/player/queue — add one item to the end of the queue.
+   * Scope: user-modify-playback-state. Premium only.
+   *
+   * Spotify offers **no** endpoint to remove a queued item or reorder the
+   * queue — checked 2026-09-13. Skipping past an item is the only way to get
+   * rid of it, so do not look for a remove_from_queue to pair with this.
+   */
+  async addToQueue(uri: string, options: { deviceId?: string } = {}): Promise<null> {
+    return this.write("POST", "/me/player/queue", {
+      params: { uri, device_id: options.deviceId },
+    });
+  }
+
   /** GET /v1/me/player/devices — every device Spotify Connect can reach. Scope: user-read-playback-state. */
   async getDevices(): Promise<{ devices: SpotifyDevice[] }> {
     return this.get("/me/player/devices", {});

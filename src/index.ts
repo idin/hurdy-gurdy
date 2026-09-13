@@ -26,6 +26,15 @@ import type { Env, UserProps } from "./types";
 
 const SEARCH_TYPES = ["track", "artist", "album", "playlist"] as const satisfies readonly SearchType[];
 
+/** The four kinds of thing a library holds. */
+const LIBRARY_TYPES = ["tracks", "artists", "albums", "playlists"] as const;
+
+/** Transport actions that take no argument beyond a device. */
+const TRANSPORT_ACTIONS = ["pause", "resume", "next", "previous"] as const;
+
+/** What modify_library can do. */
+const LIBRARY_WRITE_ACTIONS = ["save", "remove"] as const;
+
 /**
  * Every list tool shares the same two paging parameters, so the shape is
  * declared once here rather than repeated per tool with a chance to drift.
@@ -92,10 +101,7 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
 
   async init() {
     this.registerSearchTool();
-    this.registerLikedTracksTool();
-    this.registerFollowedArtistsTool();
-    this.registerSavedAlbumsTool();
-    this.registerPlaylistsTool();
+    this.registerLibraryTool();
     this.registerPlaylistTracksTool();
     this.registerPlaylistWriteTools();
     this.registerLibraryWriteTools();
@@ -107,12 +113,17 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
       "search_media",
       {
         description:
-          "Search Spotify for tracks, artists, albums and playlists. Unlike " +
-          "the built-in Spotify connector's search (capped at 5 results " +
-          "total, one page, no way to ask for more), this returns up to 10 " +
-          "results per type per call and accepts a cursor to page further. " +
-          "Supports Spotify's field filters in the query, e.g. " +
-          '`artist:Radiohead track:Karma Police` or `year:2020`.',
+          "Search Spotify for tracks, artists, albums and playlists — one " +
+          "search across all four kinds, not a separate tool per kind. " +
+          "Unlike the built-in Spotify connector's search (capped at 5 " +
+          "results total, one page, no way to ask for more), this returns up " +
+          "to 10 results per type per call and accepts a cursor to page " +
+          "further. Supports Spotify's field filters in the query, e.g. " +
+          "`artist:Radiohead track:Karma Police` or `year:2020`.\n\n" +
+          "Every result carries `inLibrary`, so a search answers \"do I " +
+          "already have this?\" without a second call. Searching playlists " +
+          "covers both the user's own and everyone else's; `inLibrary` is " +
+          "what tells them apart.",
         inputSchema: {
           query: z.string().describe("Free-text query, optionally using Spotify field filters."),
           types: z
@@ -137,76 +148,62 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
     );
   }
 
-  private registerLikedTracksTool() {
+  /**
+   * One tool for the whole library, with the kind as a parameter.
+   *
+   * Four separate tools — liked tracks, followed artists, saved albums,
+   * playlists — asked the agent to choose between things that are not really
+   * different: same pagination, same shape, same risk, only a different kind
+   * of row. That is a decision surface with no decision in it, and every
+   * extra tool competes for attention in a list the agent reads on every
+   * call.
+   */
+  private registerLibraryTool() {
     this.registerTool(
-      "get_liked_tracks",
+      "get_library",
       {
         description:
-          "List the user's liked (saved) tracks on Spotify, one page at a " +
-          "time. Unlike the built-in connector, which has no tool for this " +
-          "at all — only a 5-result search — this pages through the full " +
-          "library via the real Spotify API. Pass the returned cursor back " +
-          "to fetch the next page; a null cursor means this was the last page.",
-        inputSchema: PAGING_SCHEMA,
+          "List what is in the user's Spotify library, one page at a time: "
+          + "liked tracks, followed artists, saved albums, or playlists they "
+          + "own or follow. This is what answers \"what music do I have\" "
+          + "completely — the built-in Spotify connector has no library tools "
+          + "at all, only a search capped at five results. Pass the returned "
+          + "cursor back for the next page; a null cursor means the last page. "
+          + "Every item comes back with inLibrary true, by construction.",
+        inputSchema: {
+          type: z
+            .enum(LIBRARY_TYPES)
+            .describe(
+              "Which part of the library: tracks (liked songs), artists "
+              + "(followed), albums (saved), or playlists (owned or followed).",
+            ),
+          ...PAGING_SCHEMA,
+        },
       },
-      async ({ limit, cursor }) => {
+      async ({ type, limit, cursor }) => {
         const provider = await this.provider();
-        const page = await provider.getLikedTracks({ limit, cursor });
+        const page = await this.readLibrary(provider, type, { limit, cursor });
         return { content: [{ type: "text" as const, text: JSON.stringify(page, null, 2) }] };
       },
     );
   }
 
-  private registerFollowedArtistsTool() {
-    this.registerTool(
-      "get_followed_artists",
-      {
-        description:
-          "List every artist the user follows on Spotify, one page at a " +
-          "time — this is what answers \"what bands do I like\" completely, " +
-          "which the built-in connector's 5-result search cannot. Pass the " +
-          "returned cursor back to fetch the next page.",
-        inputSchema: PAGING_SCHEMA,
-      },
-      async ({ limit, cursor }) => {
-        const provider = await this.provider();
-        const page = await provider.getFollowedArtists({ limit, cursor });
-        return { content: [{ type: "text" as const, text: JSON.stringify(page, null, 2) }] };
-      },
-    );
-  }
-
-  private registerSavedAlbumsTool() {
-    this.registerTool(
-      "get_saved_albums",
-      {
-        description:
-          "List the user's saved albums on Spotify, one page at a time.",
-        inputSchema: PAGING_SCHEMA,
-      },
-      async ({ limit, cursor }) => {
-        const provider = await this.provider();
-        const page = await provider.getSavedAlbums({ limit, cursor });
-        return { content: [{ type: "text" as const, text: JSON.stringify(page, null, 2) }] };
-      },
-    );
-  }
-
-  private registerPlaylistsTool() {
-    this.registerTool(
-      "get_playlists",
-      {
-        description:
-          "List the playlists the user owns or follows on Spotify, one " +
-          "page at a time.",
-        inputSchema: PAGING_SCHEMA,
-      },
-      async ({ limit, cursor }) => {
-        const provider = await this.provider();
-        const page = await provider.getPlaylists({ limit, cursor });
-        return { content: [{ type: "text" as const, text: JSON.stringify(page, null, 2) }] };
-      },
-    );
+  /** Dispatch one library kind to its provider method. */
+  private async readLibrary(
+    provider: SpotifyProvider,
+    type: (typeof LIBRARY_TYPES)[number],
+    options: { limit?: number; cursor?: string },
+  ) {
+    switch (type) {
+      case "tracks":
+        return provider.getLikedTracks(options);
+      case "artists":
+        return provider.getFollowedArtists(options);
+      case "albums":
+        return provider.getSavedAlbums(options);
+      case "playlists":
+        return provider.getPlaylists(options);
+    }
   }
 
   private registerPlaylistTracksTool() {
@@ -379,46 +376,44 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
 
   private registerLibraryWriteTools() {
     this.registerTool(
-      "save_to_library",
+      "modify_library",
       {
         description:
-          "Save tracks, albums, shows or episodes to the library. Takes up "
-          + "to 40 Spotify URIs of any saveable type per call.",
+          "Save items to the library, or remove them. Takes up to 40 Spotify "
+          + "URIs of any saveable type — tracks, albums, shows, episodes — in "
+          + "one call.\n\n"
+          + "REMOVING IS IRREVERSIBLE in the way that matters: re-saving an "
+          + "item does not restore its original added-at date, so its place "
+          + "in the library is lost. A removal therefore takes two calls — "
+          + "once without `confirm` for a dry run and a token, then again "
+          + "with that token. Saving needs no confirmation.",
         inputSchema: {
+          action: z.enum(LIBRARY_WRITE_ACTIONS).describe("save or remove."),
           uris: z
             .array(z.string())
             .max(LIBRARY_WRITE_MAX_ITEMS)
             .describe("Spotify URIs, e.g. spotify:track:... or spotify:album:..."),
-        },
-      },
-      async ({ uris }) => {
-        const provider = await this.requireWrites();
-        await provider.saveToLibrary!(uris);
-        return {
-          content: [{ type: "text" as const, text: `Saved ${uris.length} item(s) to the library.` }],
-        };
-      },
-    );
-
-    this.registerTool(
-      "remove_from_library",
-      {
-        description:
-          "Remove tracks, albums, shows or episodes from the library. "
-          + "IRREVERSIBLE in the way that matters: re-saving an item does not "
-          + "restore its original added-at date, so its place in the library "
-          + "is lost. Call once without `confirm` for a dry run and a token, "
-          + "then again with that token.",
-        inputSchema: {
-          uris: z.array(z.string()).max(LIBRARY_WRITE_MAX_ITEMS).describe("Spotify URIs to remove."),
           confirm: z
             .string()
             .optional()
-            .describe("The token from the dry run. Omit for the dry run itself."),
+            .describe(
+              "Removals only: the token from the dry run. Omit for the dry "
+              + "run itself. Ignored when saving.",
+            ),
         },
       },
-      async ({ uris, confirm }) => {
+      async ({ action, uris, confirm }) => {
         const provider = await this.requireWrites();
+
+        if (action === "save") {
+          await provider.saveToLibrary!(uris);
+          return {
+            content: [
+              { type: "text" as const, text: `Saved ${uris.length} item(s) to the library.` },
+            ],
+          };
+        }
+
         const operation = describeOperation("remove_from_library", "library", uris);
         const secret = this.env.COOKIE_ENCRYPTION_KEY;
         const now = Date.now();
@@ -517,47 +512,80 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
     );
 
     this.registerTool(
-      "pause",
+      "control_playback",
       {
-        description: "Pause playback. Requires Spotify Premium.",
+        description:
+          "Pause, resume, or skip. One tool because these are the same verb — "
+          + "change what the player is doing — with no parameters of their "
+          + "own. To start something specific rather than resume what is "
+          + "loaded, use `play`, which takes a URI. Requires Spotify Premium "
+          + "and an active device.",
         inputSchema: {
-          device_id: z.string().optional().describe("Target device. Uses the active one when omitted."),
+          action: z
+            .enum(TRANSPORT_ACTIONS)
+            .describe("pause, resume, next, or previous."),
+          device_id: z
+            .string()
+            .optional()
+            .describe("Target device. Uses the active one when omitted."),
         },
       },
-      async ({ device_id }) => {
+      async ({ action, device_id }) => {
         const provider = await this.provider();
-        await provider.pause!({ deviceId: device_id });
-        return { content: [{ type: "text" as const, text: "Paused." }] };
+        const deviceId = device_id;
+        switch (action) {
+          case "pause":
+            await provider.pause({ deviceId });
+            break;
+          case "resume":
+            await provider.play({ deviceId });
+            break;
+          case "next":
+            await provider.skipToNext({ deviceId });
+            break;
+          case "previous":
+            await provider.skipToPrevious({ deviceId });
+            break;
+        }
+        return { content: [{ type: "text" as const, text: `Playback: ${action}.` }] };
       },
     );
 
     this.registerTool(
-      "skip_to_next",
+      "get_queue",
       {
-        description: "Skip to the next track. Requires Spotify Premium.",
-        inputSchema: {
-          device_id: z.string().optional().describe("Target device. Uses the active one when omitted."),
-        },
+        description:
+          "What is playing now and what is queued after it. Note Spotify "
+          + "offers no way to remove a queued item or reorder the queue — "
+          + "skipping past an item is the only way to get rid of it.",
+        inputSchema: {},
       },
-      async ({ device_id }) => {
+      async () => {
         const provider = await this.provider();
-        await provider.skipToNext!({ deviceId: device_id });
-        return { content: [{ type: "text" as const, text: "Skipped to the next track." }] };
+        const queue = await provider.getQueue();
+        return { content: [{ type: "text" as const, text: JSON.stringify(queue, null, 2) }] };
       },
     );
 
     this.registerTool(
-      "skip_to_previous",
+      "add_to_queue",
       {
-        description: "Skip to the previous track. Requires Spotify Premium.",
+        description:
+          "Add one track to the end of the playback queue. Requires Spotify "
+          + "Premium and an active device. There is no matching remove — "
+          + "Spotify publishes no endpoint for it.",
         inputSchema: {
-          device_id: z.string().optional().describe("Target device. Uses the active one when omitted."),
+          uri: z.string().describe("Track URI, e.g. spotify:track:4iV5W9uYEdYUVa79Axb7Rh."),
+          device_id: z
+            .string()
+            .optional()
+            .describe("Target device. Uses the active one when omitted."),
         },
       },
-      async ({ device_id }) => {
+      async ({ uri, device_id }) => {
         const provider = await this.provider();
-        await provider.skipToPrevious!({ deviceId: device_id });
-        return { content: [{ type: "text" as const, text: "Skipped to the previous track." }] };
+        await provider.addToQueue(uri, { deviceId: device_id });
+        return { content: [{ type: "text" as const, text: `Queued ${uri}.` }] };
       },
     );
 
