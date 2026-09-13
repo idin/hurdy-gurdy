@@ -154,8 +154,10 @@ describe("SpotifyProvider.getLikedTracks", () => {
       {
         id: "track-1",
         name: "Karma Police",
+        artists: [{ uri: "spotify:artist:artist-1", name: "Radiohead" }],
         artistNames: ["Radiohead"],
         albumName: "OK Computer",
+        albumUri: "spotify:album:album-1",
         durationMs: 261973,
         uri: "spotify:track:track-1",
         // A liked track IS the library for tracks — Liked Songs and saved
@@ -272,8 +274,10 @@ describe("SpotifyProvider.getPlaylistTracks", () => {
       {
         id: "track-1",
         name: "Karma Police",
+        artists: [{ uri: "spotify:artist:artist-1", name: "Radiohead" }],
         artistNames: ["Radiohead"],
         albumName: "OK Computer",
+        albumUri: "spotify:album:album-1",
         durationMs: 261973,
         uri: "spotify:track:track-1",
         // FALSE, deliberately. A track in a playlist is not necessarily
