@@ -53,15 +53,27 @@ function toAlbum(album: SpotifyAlbum): Album {
   };
 }
 
+/**
+ * Map one Spotify playlist onto the shared shape.
+ *
+ * Both nested objects are read defensively. Spotify's documentation says
+ * `tracks` is always present and it is not — see `SpotifyPlaylist` — and
+ * `owner` is the same class of nested object from the same endpoint, so it
+ * gets the same treatment rather than waiting to be the next thing that
+ * throws in production.
+ */
 function toPlaylist(playlist: SpotifyPlaylist): Playlist {
   return {
     id: playlist.id,
     name: playlist.name,
-    ownerName: playlist.owner.display_name ?? playlist.owner.id,
-    trackCount: playlist.tracks.total,
+    ownerName: playlist.owner?.display_name ?? playlist.owner?.id ?? UNKNOWN_OWNER_NAME,
+    trackCount: playlist.tracks?.total ?? null,
     uri: playlist.uri,
   };
 }
+
+/** Shown when Spotify sends a playlist with no owner object at all. */
+const UNKNOWN_OWNER_NAME = "unknown";
 
 /** Offset-paginated Spotify endpoints all share this cursor shape: the next offset, as a string. */
 function offsetPage<SpotifyItem, Item>(

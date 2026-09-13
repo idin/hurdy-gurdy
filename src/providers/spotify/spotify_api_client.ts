@@ -68,7 +68,16 @@ export type SpotifyPlaylist = {
   id: string;
   name: string;
   owner: { id: string; display_name: string | null };
-  tracks: { total: number };
+  /**
+   * The track-count summary, which Spotify does **not** always send.
+   *
+   * Its reference page for `GET /me/playlists` documents a populated
+   * `tracks: { href, total }`, but as of 2026-09-13 the live endpoint
+   * returns `tracks: null` for every playlist — observed across all 50
+   * items of the first page of a real account. Typing it as always-present
+   * is what crashed `get_playlists` on its first real use.
+   */
+  tracks: { total: number } | null;
   uri: string;
 };
 

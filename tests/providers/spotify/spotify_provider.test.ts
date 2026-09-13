@@ -54,6 +54,95 @@ const FOLLOWED_ARTISTS_RESPONSE = {
   },
 };
 
+/**
+ * Copied from what `GET /v1/me/playlists` actually returned for Idin's
+ * account on 2026-09-13, not from Spotify's reference example.
+ *
+ * The difference is the bug: the documented example shows a populated
+ * `tracks: { href, total }` summary, and the live endpoint returns
+ * `tracks: null` for every playlist. A fixture written from the docs passes
+ * while the deployed server throws, which is exactly what happened.
+ */
+const PLAYLISTS_RESPONSE_WITHOUT_TRACK_SUMMARY = {
+  href: "https://api.spotify.com/v1/me/playlists?offset=0&limit=2",
+  limit: 2,
+  next: "https://api.spotify.com/v1/me/playlists?offset=2&limit=2",
+  offset: 0,
+  previous: null,
+  total: 131,
+  items: [
+    {
+      id: "playlist-1",
+      name: "R: Pink Floyd",
+      owner: { id: "idin.k", display_name: "idin.k" },
+      tracks: null,
+      uri: "spotify:playlist:playlist-1",
+    },
+    {
+      id: "playlist-2",
+      name: "H8: Rammstein",
+      owner: { id: "idin.k", display_name: null },
+      tracks: null,
+      uri: "spotify:playlist:playlist-2",
+    },
+  ],
+};
+
+describe("SpotifyProvider.getPlaylists", () => {
+  test("survives Spotify omitting the tracks summary", async () => {
+    // Regression: every call failed with "Cannot read properties of
+    // undefined (reading 'total')" because toPlaylist read
+    // playlist.tracks.total unguarded. See
+    // docs/bugs/unresolved/2026-09-13_get_playlists_crashes_when_spotify_omits_the_tracks_summary.md
+    globalThis.fetch = fakeSpotifyFetch(PLAYLISTS_RESPONSE_WITHOUT_TRACK_SUMMARY);
+    const provider = new SpotifyProvider("test-token");
+
+    const page = await provider.getPlaylists();
+
+    expect(page.items).toHaveLength(2);
+    expect(page.total).toBe(131);
+  });
+
+  test("reports an unknown track count as null, never as zero", async () => {
+    // null and 0 are different claims. A playlist whose count Spotify did
+    // not report is not a playlist with no tracks.
+    globalThis.fetch = fakeSpotifyFetch(PLAYLISTS_RESPONSE_WITHOUT_TRACK_SUMMARY);
+    const provider = new SpotifyProvider("test-token");
+
+    const page = await provider.getPlaylists();
+
+    expect(page.items[0].trackCount).toBeNull();
+  });
+
+  test("falls back to the owner id when display_name is null", async () => {
+    globalThis.fetch = fakeSpotifyFetch(PLAYLISTS_RESPONSE_WITHOUT_TRACK_SUMMARY);
+    const provider = new SpotifyProvider("test-token");
+
+    const page = await provider.getPlaylists();
+
+    expect(page.items[0].ownerName).toBe("idin.k");
+    expect(page.items[1].ownerName).toBe("idin.k");
+  });
+
+  test("still reports a real track count when Spotify does send one", async () => {
+    // The near-miss: the fix must not discard a count that is present.
+    globalThis.fetch = fakeSpotifyFetch({
+      ...PLAYLISTS_RESPONSE_WITHOUT_TRACK_SUMMARY,
+      items: [
+        {
+          ...PLAYLISTS_RESPONSE_WITHOUT_TRACK_SUMMARY.items[0],
+          tracks: { total: 42 },
+        },
+      ],
+    });
+    const provider = new SpotifyProvider("test-token");
+
+    const page = await provider.getPlaylists();
+
+    expect(page.items[0].trackCount).toBe(42);
+  });
+});
+
 describe("SpotifyProvider.getLikedTracks", () => {
   test("maps a Spotify saved-tracks page onto the shared Track shape", async () => {
     globalThis.fetch = fakeSpotifyFetch(SAVED_TRACKS_RESPONSE);

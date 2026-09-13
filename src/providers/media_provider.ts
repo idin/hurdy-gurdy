@@ -40,7 +40,16 @@ export type Playlist = {
   id: string;
   name: string;
   ownerName: string;
-  trackCount: number;
+  /**
+   * How many tracks the playlist holds, or `null` when the provider did not
+   * say.
+   *
+   * Nullable rather than defaulted to `0`, because a count the provider
+   * withheld is not a count of zero, and returning `0` would be inventing a
+   * fact the caller would have no way to distinguish from a real empty
+   * playlist. A caller needing the true count pages `getPlaylistTracks`.
+   */
+  trackCount: number | null;
   uri: string;
 };
 
