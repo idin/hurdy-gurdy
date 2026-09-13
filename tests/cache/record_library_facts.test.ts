@@ -39,7 +39,9 @@ function track(
     artistNames: artists.map((entry) => entry.name),
     albumName: "Meddle",
     albumUri: "spotify:album:meddle",
+    albumTrackCount: null,
     durationMs: 1,
+    isrc: null,
   };
 }
 

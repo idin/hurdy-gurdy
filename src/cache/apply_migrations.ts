@@ -59,6 +59,10 @@ export const MIGRATIONS: readonly Migration[] = [
     description: "album gains work_key, grouping masters of one album",
     statement: "ALTER TABLE album ADD COLUMN work_key TEXT",
   },
+  {
+    description: "track gains isrc, the cross-service recording identifier",
+    statement: "ALTER TABLE track ADD COLUMN isrc TEXT",
+  },
 ];
 
 /**

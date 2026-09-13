@@ -96,7 +96,22 @@ export type Track = LibraryMembership & {
   albumName: string | null;
   /** The album this track belongs to, when the provider said. */
   albumUri: string | null;
+  /**
+   * How many tracks that album has, when the provider said.
+   *
+   * Carried on the track because a full track object nests it, so a library
+   * read supplies album coverage denominators without a second fetch.
+   */
+  albumTrackCount: number | null;
   durationMs: number;
+  /**
+   * The recording's ISRC, when the provider knows one.
+   *
+   * The identifier that crosses services: ISRC is how a Spotify track maps to
+   * a MusicBrainz recording, which is what the permanent catalogue is keyed
+   * on. Null for local files and occasionally for older catalogue.
+   */
+  isrc: string | null;
 };
 
 export type Artist = LibraryMembership &

@@ -66,6 +66,11 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
      -- opening with a radio and car engines and a short one that is just the
      -- music — two different tracks, and merging them would lose that.
      song_key     TEXT,
+     -- The recording's ISRC. Identifies a recording ACROSS services, so it is
+     -- the hop from a Spotify id to a MusicBrainz id and the spine the
+     -- permanent catalogue will be keyed on. Arrives free on every /me/tracks
+     -- page; the type simply never asked for it until 2026-09-13.
+     isrc         TEXT,
      -- From the data export's streaming history, which the Web API cannot
      -- supply at any price. Plays past the 30s skip threshold and plays
      -- abandoned before it are counted separately: a track dropped after

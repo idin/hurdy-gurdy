@@ -82,15 +82,20 @@ export async function recordTracks(
     statements.push(
       database
         .prepare(
-          `INSERT INTO track (uri, id, name, album_uri, duration_ms, is_liked, song_key, cached_at)
-             VALUES (?, ?, ?, NULL, ?, ?, ?, ?)
+          `INSERT INTO track (uri, id, name, album_uri, duration_ms, is_liked, song_key, isrc, cached_at)
+             VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)
            ON CONFLICT(uri) DO UPDATE SET
              name = excluded.name,
              duration_ms = excluded.duration_ms,
              -- MAX, not excluded: a track met again in a playlist must not
              -- erase the fact that it is liked.
              is_liked = MAX(track.is_liked, excluded.is_liked),
-             song_key = excluded.song_key,
+             -- COALESCE, not excluded: an export row has no duration, so its
+             -- song key is meaningless and must not overwrite a real one
+             -- built from an API read.
+             duration_ms = COALESCE(excluded.duration_ms, track.duration_ms),
+             song_key = COALESCE(excluded.song_key, track.song_key),
+             isrc = COALESCE(excluded.isrc, track.isrc),
              cached_at = excluded.cached_at`,
         )
         .bind(
@@ -99,7 +104,12 @@ export async function recordTracks(
           track.name,
           track.durationMs,
           liked,
-          buildSongKey({ title: track.name, durationMs: track.durationMs }),
+          // No duration means no meaningful key — a title-only key would merge
+          // the two Detroit Rock City versions Idin said must stay apart.
+          track.durationMs > 0
+            ? buildSongKey({ title: track.name, durationMs: track.durationMs })
+            : null,
+          track.isrc,
           options.now,
         ),
     );

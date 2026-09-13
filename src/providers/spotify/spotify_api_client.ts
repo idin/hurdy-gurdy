@@ -93,8 +93,25 @@ export type SpotifyTrack = {
   id: string;
   name: string;
   artists: { id: string; name: string }[];
-  album: { id: string; name: string };
+  /**
+   * The album, which carries its own track count on a full track object.
+   *
+   * That count is the denominator for album coverage and half of a work key,
+   * and it arrives free on every `/me/tracks` page — so a library read
+   * supplies it without a separate album fetch.
+   */
+  album: { id: string; name: string; total_tracks?: number; release_date?: string };
   duration_ms: number;
+  /**
+   * External identifiers, of which the ISRC is the one that matters.
+   *
+   * An ISRC identifies a *recording* across services, so it is the hop from a
+   * Spotify id to a MusicBrainz id — the identity spine the permanent
+   * catalogue is keyed on. Memory recorded on 2026-09-13 that no ISRC had
+   * been seen in any tool output and that the paged endpoints might not
+   * return it; they do. This type simply did not ask for it.
+   */
+  external_ids?: { isrc?: string };
   uri: string;
 };
 

@@ -62,7 +62,13 @@ function toTrack(track: SpotifyTrack): Track {
     artistNames: artists.map((artist) => artist.name),
     albumName: track.album?.name ?? null,
     albumUri: track.album?.id === undefined ? null : `spotify:album:${track.album.id}`,
+    // Free on a full track object, and the denominator for album coverage.
+    albumTrackCount: track.album?.total_tracks ?? null,
     durationMs: track.duration_ms,
+    // The hop from a Spotify id to a MusicBrainz recording. Discarded until
+    // now because the type did not ask for it, not because Spotify withheld
+    // it — the same shape as the artist ids this mapper used to drop.
+    isrc: track.external_ids?.isrc ?? null,
     uri: track.uri,
   };
 }

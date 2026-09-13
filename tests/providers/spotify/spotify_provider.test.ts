@@ -158,7 +158,9 @@ describe("SpotifyProvider.getLikedTracks", () => {
         artistNames: ["Radiohead"],
         albumName: "OK Computer",
         albumUri: "spotify:album:album-1",
+        albumTrackCount: null,
         durationMs: 261973,
+        isrc: null,
         uri: "spotify:track:track-1",
         // A liked track IS the library for tracks — Liked Songs and saved
         // tracks are the same store, so membership holds by construction.
@@ -278,7 +280,9 @@ describe("SpotifyProvider.getPlaylistTracks", () => {
         artistNames: ["Radiohead"],
         albumName: "OK Computer",
         albumUri: "spotify:album:album-1",
+        albumTrackCount: null,
         durationMs: 261973,
+        isrc: null,
         uri: "spotify:track:track-1",
         // FALSE, deliberately. A track in a playlist is not necessarily
         // liked — playlist membership and library membership are independent
