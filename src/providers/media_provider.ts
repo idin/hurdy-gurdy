@@ -261,7 +261,16 @@ export interface MediaProvider {
    * @param uri - What to play. A track, album, artist or playlist URI; the
    *   provider decides how each is sent. Absent resumes what is loaded.
    */
-  play?(options?: { uri?: string; deviceId?: string }): Promise<void>;
+  play?(options?: {
+    uri?: string;
+    deviceId?: string;
+    /**
+     * A device named the way a person would name it — "phone", "kitchen",
+     * "TV". Resolved against both the device's name and its type. When it
+     * matches nothing the call fails rather than playing somewhere else.
+     */
+    deviceName?: string;
+  }): Promise<void>;
 
   /** Pause playback. */
   pause?(options?: { deviceId?: string }): Promise<void>;

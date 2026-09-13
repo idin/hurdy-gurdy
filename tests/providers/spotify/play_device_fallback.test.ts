@@ -126,3 +126,82 @@ describe("SpotifyProvider.play device fallback", () => {
     );
   });
 });
+
+describe("SpotifyProvider.play device by name", () => {
+  test("matches a device by type, so \"phone\" finds a Smartphone", async () => {
+    const withPhone = JSON.stringify({
+      devices: [
+        { id: "phone-1", name: "Idin's iPhone", type: "Smartphone", is_active: false, is_restricted: false, volume_percent: 70 },
+        { id: "device-2", name: "Cleopatra", type: "Computer", is_active: true, is_restricted: false, volume_percent: 100 },
+      ],
+    });
+    const { fetcher, calls } = trackingFetch((url) =>
+      url.includes("/me/player/devices")
+        ? new Response(withPhone, { status: 200 })
+        : new Response(null, { status: 204 }),
+    );
+    globalThis.fetch = fetcher;
+
+    await new SpotifyProvider("test-token").play({ deviceName: "phone" });
+
+    expect(calls[calls.length - 1].url).toContain("device_id=phone-1");
+  });
+
+  test("matches on the device's own name, case-insensitively", async () => {
+    const { fetcher, calls } = trackingFetch((url) =>
+      url.includes("/me/player/devices")
+        ? new Response(DEVICES_BODY, { status: 200 })
+        : new Response(null, { status: 204 }),
+    );
+    globalThis.fetch = fetcher;
+
+    await new SpotifyProvider("test-token").play({ deviceName: "cleopatra" });
+
+    expect(calls[calls.length - 1].url).toContain("device_id=device-2");
+  });
+
+  test("refuses rather than playing somewhere else when the device is absent", async () => {
+    // The bug this fixes: Idin asked for his phone, the phone was not
+    // visible to Spotify Connect, and the track played on his computer with
+    // nothing said. Understood, ignored, and unmentioned is worse than an
+    // error.
+    const { fetcher } = trackingFetch((url) =>
+      url.includes("/me/player/devices")
+        ? new Response(DEVICES_BODY, { status: 200 })
+        : new Response(null, { status: 204 }),
+    );
+    globalThis.fetch = fetcher;
+
+    await expect(
+      new SpotifyProvider("test-token").play({ deviceName: "phone" }),
+    ).rejects.toThrow(/No Spotify device matching "phone"/);
+  });
+
+  test("names what is available when it refuses", async () => {
+    const { fetcher } = trackingFetch((url) =>
+      url.includes("/me/player/devices")
+        ? new Response(DEVICES_BODY, { status: 200 })
+        : new Response(null, { status: 204 }),
+    );
+    globalThis.fetch = fetcher;
+
+    await expect(
+      new SpotifyProvider("test-token").play({ deviceName: "phone" }),
+    ).rejects.toThrow(/Cleopatra \(Computer\)/);
+  });
+
+  test("never plays at all when the named device is missing", async () => {
+    // Stronger than the message assertion: no play request may be sent.
+    const { fetcher, calls } = trackingFetch((url) =>
+      url.includes("/me/player/devices")
+        ? new Response(DEVICES_BODY, { status: 200 })
+        : new Response(null, { status: 204 }),
+    );
+    globalThis.fetch = fetcher;
+
+    await expect(
+      new SpotifyProvider("test-token").play({ deviceName: "kitchen" }),
+    ).rejects.toThrow();
+    expect(calls.filter((call) => call.url.includes("/me/player/play"))).toHaveLength(0);
+  });
+});

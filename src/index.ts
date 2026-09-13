@@ -490,19 +490,33 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
         description:
           "Start or resume playback. Pass any Spotify URI — a track, album, "
           + "artist or playlist — and it plays; omit the URI to resume what is "
-          + "already loaded. Requires Spotify Premium and an active device; "
-          + "call `list_devices` and `transfer_playback` if there is none.",
+          + "already loaded. Requires Spotify Premium.\n\n"
+          + "To play somewhere specific, pass `device` with the name as a "
+          + "person would say it — \"phone\", \"kitchen\", \"TV\". If no such "
+          + "device is available the call fails and says what is, rather than "
+          + "playing somewhere else. Note Spotify only lists a device while "
+          + "its app is running or was recently open, so a phone with Spotify "
+          + "closed cannot be played to at all until it is opened.\n\n"
+          + "With no device named, an active device is used, and one is woken "
+          + "if none is active.",
         inputSchema: {
           uri: z
             .string()
             .optional()
             .describe("Track, album, artist or playlist URI. Omit to resume."),
-          device_id: z.string().optional().describe("Target device. Uses the active one when omitted."),
+          device: z
+            .string()
+            .optional()
+            .describe('Device name or type, e.g. "phone", "TV", "Cleopatra".'),
+          device_id: z
+            .string()
+            .optional()
+            .describe("Exact device id, when one is already known."),
         },
       },
-      async ({ uri, device_id }) => {
+      async ({ uri, device, device_id }) => {
         const provider = await this.provider();
-        await provider.play!({ uri, deviceId: device_id });
+        await provider.play!({ uri, deviceId: device_id, deviceName: device });
         return {
           content: [
             { type: "text" as const, text: uri === undefined ? "Resumed playback." : `Playing ${uri}.` },

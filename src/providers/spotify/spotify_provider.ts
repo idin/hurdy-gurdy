@@ -343,6 +343,30 @@ export class SpotifyProvider implements MediaProvider {
   }
 
   /**
+   * Find a device by name, loosely.
+   *
+   * A caller saying "play on my phone" should not have to know that the
+   * device is called `Idin's iPhone`. Matching is case-insensitive and
+   * substring-based, and device *type* is matched too — "phone" finds a
+   * `Smartphone`, "tv" finds a `TV` — because the type is usually what a
+   * person means when they name a device casually.
+   *
+   * @param wanted - What the caller called it.
+   * @returns The matching device, or null when nothing matches.
+   */
+  private async findDeviceByName(wanted: string): Promise<Device | null> {
+    const devices = await this.listDevices();
+    const needle = wanted.trim().toLowerCase();
+    const matches = (device: Device): boolean =>
+      device.name.toLowerCase().includes(needle)
+      || device.type.toLowerCase().includes(needle)
+      // "phone" should find a Smartphone, which the substring above misses
+      // in the other direction.
+      || needle.includes(device.type.toLowerCase());
+    return devices.find(matches) ?? null;
+  }
+
+  /**
    * Start or resume playback, waking a device when none is active.
    *
    * Spotify fails a device-less `play` with `404 NO_ACTIVE_DEVICE` whenever
@@ -360,8 +384,32 @@ export class SpotifyProvider implements MediaProvider {
    * Restricted devices are skipped: Spotify marks those as unable to accept
    * Web API commands, so targeting one trades this error for another.
    */
-  async play(options: { uri?: string; deviceId?: string } = {}): Promise<void> {
+  async play(
+    options: { uri?: string; deviceId?: string; deviceName?: string } = {},
+  ): Promise<void> {
     const target = buildPlayTarget(options.uri);
+
+    // A named device that is not there must be reported, never quietly
+    // swapped for another. Asking for a phone and hearing the desktop speakers
+    // with no explanation is worse than an error: the request was understood,
+    // ignored, and not mentioned.
+    if (options.deviceName !== undefined && options.deviceId === undefined) {
+      const named = await this.findDeviceByName(options.deviceName);
+      if (named === null) {
+        const available = (await this.listDevices())
+          .map((device) => `${device.name} (${device.type})`)
+          .join(", ");
+        throw new Error(
+          `No Spotify device matching "${options.deviceName}" is available. `
+            + `Spotify only lists a device while its app is running or was `
+            + `recently open — for a phone, open Spotify on it and try again. `
+            + `Currently available: ${available || "none"}.`,
+        );
+      }
+      await this.client.play({ ...target, deviceId: named.id ?? undefined });
+      return;
+    }
+
     try {
       await this.client.play({ ...target, deviceId: options.deviceId });
       return;
