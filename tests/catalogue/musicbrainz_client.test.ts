@@ -5,6 +5,7 @@ import {
   isMusicBrainzBusy,
   MUSICBRAINZ_USER_AGENT,
   MusicBrainzError,
+  searchRecording,
 } from "../../src/catalogue/musicbrainz_client";
 
 /**
@@ -115,5 +116,119 @@ describe("isMusicBrainzBusy", () => {
 
   test("an unrelated error is not a rate limit", async () => {
     expect(isMusicBrainzBusy(new Error("network"))).toBe(false);
+  });
+});
+
+describe("searchRecording", () => {
+  /** The real Ace of Spades result: four recordings, all scoring 100. */
+  const ACE_OF_SPADES = {
+    recordings: [
+      { id: "rec-live-1", title: "Ace of Spades", score: 100, length: 286_000 },
+      { id: "rec-studio", title: "Ace of Spades", score: 100, length: 168_000 },
+      { id: "rec-edit", title: "Ace of Spades", score: 100, length: 137_000 },
+      { id: "rec-live-2", title: "Ace of Spades", score: 100, length: 316_000 },
+    ],
+  };
+
+  function fakeSearch(results: unknown, detail: unknown = { id: "x", title: "x" }) {
+    const requests: string[] = [];
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = input.toString();
+      requests.push(url);
+      return new Response(
+        JSON.stringify(url.includes("query=") ? results : detail),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+    return { fetcher, requests };
+  }
+
+  test("duration picks the right one among equally-scored matches", async () => {
+    // The whole danger. Four recordings score 100 and span three minutes of
+    // length; taking the top score would pick arbitrarily among genuinely
+    // different recordings.
+    const { fetcher, requests } = fakeSearch(ACE_OF_SPADES, {
+      id: "rec-studio",
+      title: "Ace of Spades",
+    });
+
+    const found = await searchRecording(
+      { title: "Ace of Spades", artistName: "Motörhead", durationMs: 168_000 },
+      fetcher,
+    );
+
+    expect(found?.mbid).toBe("rec-studio");
+    expect(requests[1]).toContain("rec-studio");
+  });
+
+  test("returns null rather than guessing when no length is close", async () => {
+    // A wrong composition link groups two unrelated songs, invisibly. That is
+    // the failure that made ISRC replace title matching in the first place.
+    const { fetcher } = fakeSearch(ACE_OF_SPADES);
+
+    const found = await searchRecording(
+      { title: "Ace of Spades", artistName: "Motörhead", durationMs: 240_000 },
+      fetcher,
+    );
+
+    expect(found).toBeNull();
+  });
+
+  test("refuses a weak title match even at the right length", async () => {
+    // A low score means the name matched loosely — a different song sharing
+    // words, which the length cannot rescue.
+    const { fetcher } = fakeSearch({
+      recordings: [{ id: "rec-other", title: "Ace", score: 55, length: 168_000 }],
+    });
+
+    const found = await searchRecording(
+      { title: "Ace of Spades", artistName: "Motörhead", durationMs: 168_000 },
+      fetcher,
+    );
+
+    expect(found).toBeNull();
+  });
+
+  test("ignores a result with no length at all", async () => {
+    // Without a length there is nothing to disambiguate with, so accepting it
+    // would be taking the top score — the thing this exists to avoid.
+    const { fetcher } = fakeSearch({
+      recordings: [{ id: "rec-nolength", title: "Ace of Spades", score: 100 }],
+    });
+
+    const found = await searchRecording(
+      { title: "Ace of Spades", artistName: "Motörhead", durationMs: 168_000 },
+      fetcher,
+    );
+
+    expect(found).toBeNull();
+  });
+
+  test("accepts a small difference, since masters drift by a second or two", async () => {
+    const { fetcher } = fakeSearch(
+      { recordings: [{ id: "rec-studio", title: "Ace of Spades", score: 100, length: 168_000 }] },
+      { id: "rec-studio", title: "Ace of Spades" },
+    );
+
+    const found = await searchRecording(
+      { title: "Ace of Spades", artistName: "Motörhead", durationMs: 170_000 },
+      fetcher,
+    );
+
+    expect(found?.mbid).toBe("rec-studio");
+  });
+
+  test("escapes Lucene syntax that track titles genuinely contain", async () => {
+    // An unescaped quote or colon makes a malformed query, which MusicBrainz
+    // rejects rather than ignoring.
+    const { fetcher, requests } = fakeSearch({ recordings: [] });
+
+    await searchRecording(
+      { title: 'Christmas Eve / Sarajevo 12/24 (Instrumental)', artistName: "A:B", durationMs: 1 },
+      fetcher,
+    );
+
+    expect(requests[0]).toContain("query=");
+    expect(() => decodeURIComponent(requests[0])).not.toThrow();
   });
 });

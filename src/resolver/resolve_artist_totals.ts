@@ -22,6 +22,7 @@ import type { MediaProvider } from "../providers/media_provider";
 import {
   findRecordingByIsrc,
   isMusicBrainzBusy,
+  searchRecording,
 } from "../catalogue/musicbrainz_client";
 import type { SpotifyApiClient } from "../providers/spotify/spotify_api_client";
 import {
@@ -242,19 +243,41 @@ async function resolveMusicBrainzIdentity(
   task: ResolutionTask,
 ): Promise<void> {
   const row = await database
-    .prepare(`SELECT isrc FROM track WHERE uri = ?`)
+    .prepare(
+      `SELECT t.isrc, t.name, t.duration_ms, MIN(a.name) AS artist_name
+         FROM track t
+         LEFT JOIN track_artist ta ON ta.track_uri = t.uri
+         LEFT JOIN artist a ON a.uri = ta.artist_uri
+        WHERE t.uri = ?
+        GROUP BY t.uri`,
+    )
     .bind(task.subjectUri)
-    .first<{ isrc: string | null }>();
+    .first<{
+      isrc: string | null;
+      name: string;
+      duration_ms: number | null;
+      artist_name: string | null;
+    }>();
 
-  if (row?.isrc == null) {
-    // Nothing to look up. Completing rather than failing keeps a track with
-    // no ISRC from being retried three times before being given up on.
+  if (row === null) {
     await completeResolution(database, task);
     return;
   }
 
   try {
-    const recording = await findRecordingByIsrc(row.isrc);
+    let recording = row.isrc == null ? null : await findRecordingByIsrc(row.isrc);
+
+    // The ISRC index is markedly less complete than the database itself —
+    // "Ace of Spades" has no ISRC match at all — so a miss falls back to
+    // searching by title, artist and length rather than giving up.
+    if (recording === null && row.artist_name !== null && row.duration_ms !== null) {
+      recording = await searchRecording({
+        title: row.name,
+        artistName: row.artist_name,
+        durationMs: row.duration_ms,
+      });
+    }
+
     if (recording !== null) {
       await database
         .prepare(
@@ -266,12 +289,10 @@ async function resolveMusicBrainzIdentity(
     await completeResolution(database, task);
   } catch (error) {
     if (isMusicBrainzBusy(error)) {
-      // Rate-limited. Rethrow so the caller records a failure and the task is
-      // tried again — the answer was never given, so it is not known.
+      // Rate-limited: the question was never asked, so it is not answered.
       throw error;
     }
-    // A 404 or a malformed response is an answer: MusicBrainz does not know
-    // this ISRC. Completing stops it being asked again.
+    // Anything else is an answer — MusicBrainz does not know this track.
     await completeResolution(database, task);
   }
 }

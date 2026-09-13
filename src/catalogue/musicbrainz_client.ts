@@ -162,3 +162,82 @@ async function requestJson<Result>(path: string, fetcher: typeof fetch): Promise
 
   return (await response.json()) as Result;
 }
+
+/**
+ * How far a search result's length may differ and still be the same
+ * recording.
+ *
+ * Masters of one recording differ by a second or two. Different recordings of
+ * one song differ by far more — Motörhead's "Ace of Spades" returns matches at
+ * 137s, 173s, 286s and 316s, **all scoring 100**, because the search scores
+ * title and artist and knows nothing about which pressing is meant.
+ *
+ * Five seconds matches `SAME_SONG_DURATION_TOLERANCE_SECONDS` in the song
+ * key, deliberately: the two answer the same question and disagreeing would
+ * let a track match a recording its own key says is a different song.
+ */
+export const SEARCH_DURATION_TOLERANCE_MILLISECONDS = 5_000;
+
+/**
+ * The minimum search score worth considering at all.
+ *
+ * MusicBrainz scores 0-100 on title and artist similarity. Below this the
+ * name matched loosely and the result is a different song that happens to
+ * share words.
+ */
+export const MINIMUM_SEARCH_SCORE = 90;
+
+/**
+ * Find a recording by title, artist and length, when its ISRC is unknown.
+ *
+ * **A fallback, not a first choice.** An ISRC is the label's own assertion of
+ * identity; this is a guess from three attributes. It exists because the ISRC
+ * index is far less complete than the database — "Ace of Spades" has no ISRC
+ * match at all, which is not obscure catalogue.
+ *
+ * Duration is what makes the guess safe. Without it the search returns
+ * four equally-scored Motörhead recordings spanning three minutes of length,
+ * and picking the top one would be picking arbitrarily. With it, only a
+ * recording of the right length survives — which is the same rule the song
+ * key already uses, so the two cannot disagree.
+ *
+ * Returns null rather than a best guess when nothing matches closely. A wrong
+ * composition link is worse than none: it would group two unrelated songs and
+ * do so invisibly, which is the failure that made ISRC replace title matching
+ * in the first place.
+ *
+ * @param query.title - The recording's title.
+ * @param query.artistName - The performing artist.
+ * @param query.durationMs - Its length, which does the disambiguating.
+ * @param fetcher - Injected for tests.
+ * @returns The matching recording, or null when none is close enough.
+ */
+export async function searchRecording(
+  query: { title: string; artistName: string; durationMs: number },
+  fetcher: typeof fetch = fetch,
+): Promise<MusicBrainzRecording | null> {
+  const lucene = `recording:"${escapeLucene(query.title)}" AND artist:"${escapeLucene(query.artistName)}"`;
+  const found = await requestJson<{
+    recordings?: { id: string; title: string; score?: number; length?: number }[];
+  }>(`/recording?query=${encodeURIComponent(lucene)}&limit=25&fmt=json`, fetcher);
+
+  const candidate = (found.recordings ?? []).find(
+    (recording) =>
+      (recording.score ?? 0) >= MINIMUM_SEARCH_SCORE
+      && recording.length != null
+      && Math.abs(recording.length - query.durationMs) <= SEARCH_DURATION_TOLERANCE_MILLISECONDS,
+  );
+
+  return candidate === undefined ? null : findRecordingDetail(candidate.id, fetcher);
+}
+
+/**
+ * Escape the characters Lucene treats as syntax.
+ *
+ * Track titles contain all of them. An unescaped quote or colon turns a
+ * search into a malformed query, which MusicBrainz rejects rather than
+ * ignoring.
+ */
+function escapeLucene(value: string): string {
+  return value.replace(/(["\\+\-!(){}\[\]^~*?:/]|&&|\|\|)/g, "\\$1");
+}
