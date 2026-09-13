@@ -39,6 +39,15 @@ import {
   prepareMediaCache,
   storeCachedResponse,
 } from "./media_cache_store";
+import {
+  forgetLikedTracks,
+  linkTracksToKnownArtists,
+  recordAlbums,
+  recordArtists,
+  recordPlaylistTracks,
+  recordPlaylists,
+  recordTracks,
+} from "./record_library_facts";
 
 /** A clock, injected so cache expiry is testable without waiting 66 days. */
 export type Clock = () => number;
@@ -183,9 +192,14 @@ export class CachedMediaProvider implements MediaProvider {
   }
 
   async getLikedTracks(options: { limit?: number; cursor?: string } = {}): Promise<Page<Track>> {
-    return this.readThrough("getLikedTracks", { ...options }, () =>
+    const page = await this.readThrough("getLikedTracks", { ...options }, () =>
       this.inner.getLikedTracks(options),
     );
+    // Recorded on every read, cache hit included: the rows are what the
+    // coverage views count, and a hit still needs them present.
+    await recordTracks(this.database, page.items, { isLiked: true, now: this.now() });
+    await linkTracksToKnownArtists(this.database, page.items);
+    return page;
   }
 
   async getFollowedArtists(
@@ -194,6 +208,7 @@ export class CachedMediaProvider implements MediaProvider {
     const page = await this.readThrough("getFollowedArtists", { ...options }, () =>
       this.inner.getFollowedArtists(options),
     );
+    await recordArtists(this.database, page.items, { isFollowed: true, now: this.now() });
     return this.fillArtistCoverage(page);
   }
 
@@ -201,20 +216,31 @@ export class CachedMediaProvider implements MediaProvider {
     const page = await this.readThrough("getSavedAlbums", { ...options }, () =>
       this.inner.getSavedAlbums(options),
     );
+    await recordAlbums(this.database, page.items, { isSaved: true, now: this.now() });
     return this.fillAlbumCoverage(page);
   }
 
   async getPlaylists(options: { limit?: number; cursor?: string } = {}): Promise<Page<Playlist>> {
-    return this.readThrough("getPlaylists", { ...options }, () => this.inner.getPlaylists(options));
+    const page = await this.readThrough("getPlaylists", { ...options }, () =>
+      this.inner.getPlaylists(options),
+    );
+    await recordPlaylists(this.database, page.items, { now: this.now() });
+    return page;
   }
 
   async getPlaylistTracks(
     playlistId: string,
     options: { limit?: number; cursor?: string } = {},
   ): Promise<Page<Track>> {
-    return this.readThrough("getPlaylistTracks", { playlistId, ...options }, () =>
+    const page = await this.readThrough("getPlaylistTracks", { playlistId, ...options }, () =>
       this.inner.getPlaylistTracks(playlistId, options),
     );
+    // The playlist URI is not on the page, and the tool layer passes an id.
+    await recordPlaylistTracks(this.database, `spotify:playlist:${playlistId}`, page, {
+      now: this.now(),
+    });
+    await linkTracksToKnownArtists(this.database, page.items);
+    return page;
   }
 
   // --- Writes --------------------------------------------------------------
@@ -290,6 +316,10 @@ export class CachedMediaProvider implements MediaProvider {
 
   async removeFromLibrary(uris: string[]): Promise<void> {
     await this.inner.removeFromLibrary!(uris);
+    // Clearing the cached answers is not enough: the fact rows still say
+    // liked, and the coverage views read those, so a count would stay wrong
+    // until the track was next read.
+    await forgetLikedTracks(this.database, uris);
     await this.invalidateLibraryReads();
   }
 
