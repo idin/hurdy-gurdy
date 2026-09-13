@@ -66,6 +66,14 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
      -- opening with a radio and car engines and a short one that is just the
      -- music — two different tracks, and merging them would lose that.
      song_key     TEXT,
+     -- From the data export's streaming history, which the Web API cannot
+     -- supply at any price. Plays past the 30s skip threshold and plays
+     -- abandoned before it are counted separately: a track dropped after
+     -- four seconds is evidence AGAINST liking it, and summing the two would
+     -- make a heavily-skipped track look popular. Null until an import runs.
+     play_count   INTEGER,
+     skip_count   INTEGER,
+     last_played  TEXT,
      cached_at    INTEGER NOT NULL
    )`,
 

@@ -18,14 +18,16 @@ const ANIMALS = "animals|studio|5";
 
 async function addAlbum(uri: string, name: string, date: string, tracks: number, workKey: string) {
   await database
-    .prepare(`INSERT INTO album VALUES (?, ?, ?, ?, ?, 0, ?, ?)`)
+    .prepare(`INSERT INTO album (uri, id, name, release_date, total_tracks, is_saved, work_key, cached_at)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?)`)
     .bind(uri, uri.slice(-4), name, date, tracks, workKey, NOW)
     .run();
 }
 
 async function addTrack(uri: string, songKey: string, albumUri: string, isLiked: boolean) {
   await database
-    .prepare(`INSERT INTO track VALUES (?, ?, ?, ?, 200000, ?, NULL, ?, ?)`)
+    .prepare(`INSERT INTO track (uri, id, name, album_uri, duration_ms, is_liked, liked_at, song_key, cached_at)
+       VALUES (?, ?, ?, ?, 200000, ?, NULL, ?, ?)`)
     .bind(uri, uri.slice(-6), songKey, albumUri, isLiked ? 1 : 0, songKey, NOW)
     .run();
 }
