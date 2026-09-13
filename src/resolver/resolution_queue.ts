@@ -26,7 +26,16 @@ export type ResolutionKind =
   /** Count an artist's releases. One request; `total` arrives on page one. */
   | "artist-album-count"
   /** Sum an artist's track counts. As many requests as they have pages. */
-  | "artist-track-count";
+  | "artist-track-count"
+  /**
+   * Read the next page of the liked library into the cache.
+   *
+   * The backfill. Coverage can only count what the cache holds, so a library
+   * read by hand fills in whatever page was asked for and nothing else —
+   * 2,282 liked tracks is 46 pages nobody is going to request one at a time.
+   * Queued as resolver work so it crawls on its own.
+   */
+  | "backfill-liked-tracks";
 
 /**
  * How urgent a piece of work is. Lower drains first.
@@ -38,12 +47,20 @@ export type ResolutionKind =
 export const RESOLUTION_PRIORITY = {
   /** Something the user is looking at right now. */
   ASKED_FOR: 0,
+  /**
+   * Filling the library itself.
+   *
+   * Above the artist tiers because everything else counts what this puts
+   * there: an artist's denominator resolved before their tracks are known
+   * gives a ratio with nothing on top of it.
+   */
+  BACKFILL: 1,
   /** A followed artist: the spine of the library. */
-  FOLLOWED_ARTIST: 1,
+  FOLLOWED_ARTIST: 2,
   /** An artist with liked tracks, but not followed. */
-  HAS_LIKED_TRACKS: 2,
+  HAS_LIKED_TRACKS: 3,
   /** Seen once, in a search result. May never matter. */
-  SEEN_IN_PASSING: 3,
+  SEEN_IN_PASSING: 4,
 } as const;
 
 /** A priority value, from `RESOLUTION_PRIORITY`. */

@@ -188,8 +188,11 @@ describe("artist track count", () => {
     await runResolutionTask(database, new SpotifyApiClient("t"), (await findNextResolution(database))!);
     const afterFirst = await findNextResolution(database);
 
-    expect(afterFirst?.cursor).toBe("30");
-    expect(afterFirst?.accumulated).toBe(300);
+    // Eight pages of ten releases, ten tracks each. The numbers track
+    // PAGES_PER_TICK, which was raised from three when Idin said he did not
+    // mind hitting rate limits to get the backfill done.
+    expect(afterFirst?.cursor).toBe("80");
+    expect(afterFirst?.accumulated).toBe(800);
   });
 
   test("reaches the right total across many ticks", async () => {

@@ -18,6 +18,7 @@
  * ticks, resuming from a stored cursor.
  */
 
+import type { MediaProvider } from "../providers/media_provider";
 import type { SpotifyApiClient } from "../providers/spotify/spotify_api_client";
 import {
   advanceResolution,
@@ -38,12 +39,12 @@ export const ARTIST_ALBUMS_PAGE_SIZE = 10;
 /**
  * Pages to crawl in one tick.
  *
- * Deliberately small. A tick shares its subrequest budget with whatever
- * request triggered it, and a resolver that spends the budget makes the
- * user's actual question fail — which trades something they asked for against
- * something they did not.
+ * Eight, against a fifty-subrequest budget. An alarm tick does not share its
+ * budget with a user's request — it is its own invocation — so the earlier
+ * caution about starving a caller did not apply. The remaining headroom
+ * covers the queue reads around the crawl.
  */
-export const PAGES_PER_TICK = 3;
+export const PAGES_PER_TICK = 8;
 
 /**
  * Which release types count toward an artist's totals.
@@ -75,8 +76,16 @@ export async function runResolutionTask(
   database: D1Database,
   client: SpotifyApiClient,
   task: ResolutionTask,
+  provider?: MediaProvider,
 ): Promise<{ outcome: "completed" | "advanced" | "failed" }> {
   try {
+    if (task.kind === "backfill-liked-tracks") {
+      if (provider === undefined) {
+        return { outcome: "failed" };
+      }
+      const finished = await advanceLikedTracksBackfill(database, provider, task);
+      return { outcome: finished ? "completed" : "advanced" };
+    }
     if (task.kind === "artist-album-count") {
       await resolveAlbumCount(database, client, task);
       return { outcome: "completed" };
@@ -160,5 +169,49 @@ async function advanceTrackCount(
   }
 
   await advanceResolution(database, task, { cursor: String(offset), accumulated });
+  return false;
+}
+
+/**
+ * How many library pages to pull in one tick.
+ *
+ * Each page is one request plus the writes recording its facts, so this is
+ * the coarse dial on how fast a backfill completes. Six pages of fifty is
+ * three hundred tracks a tick — a 2,282-track library in eight ticks.
+ */
+export const LIBRARY_PAGES_PER_TICK = 6;
+
+/**
+ * Read the next stretch of the liked library into the cache.
+ *
+ * Goes through the provider rather than the raw client, so every page passes
+ * the decorator's recording path — the facts, the artist links and the
+ * onward enqueueing all happen exactly as they do for a library read someone
+ * asked for. Duplicating that here would be a second implementation of it,
+ * and the two would drift.
+ *
+ * @returns True when the whole library has been read.
+ */
+async function advanceLikedTracksBackfill(
+  database: D1Database,
+  provider: MediaProvider,
+  task: ResolutionTask,
+): Promise<boolean> {
+  let cursor = task.cursor ?? undefined;
+
+  for (let page = 0; page < LIBRARY_PAGES_PER_TICK; page += 1) {
+    const result = await provider.getLikedTracks({ cursor });
+
+    if (result.nextCursor === null) {
+      await completeResolution(database, task);
+      return true;
+    }
+    cursor = result.nextCursor;
+  }
+
+  await advanceResolution(database, task, {
+    cursor: cursor ?? "0",
+    accumulated: task.accumulated,
+  });
   return false;
 }

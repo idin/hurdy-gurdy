@@ -24,7 +24,9 @@ import {
 import { forgetLikedTracks } from "./cache/record_library_facts";
 import {
   countPendingResolutions,
+  enqueueResolutions,
   findNextResolution,
+  RESOLUTION_PRIORITY,
 } from "./resolver/resolution_queue";
 import { runResolutionTask } from "./resolver/resolve_artist_totals";
 import { findNextTickDelay } from "./resolver/resolver_schedule";
@@ -160,6 +162,27 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
     // the Durable Object stacks another schedule — other-memory exhausted a
     // GitHub rate limit within an hour of getting that wrong.
     if (this.env.MEDIA_CACHE !== undefined) {
+      // Queue the library backfill. Coverage can only count what the cache
+      // holds, and nobody is going to ask for forty-six pages of liked tracks
+      // by hand — so reading them is the resolver's job like everything else.
+      // enqueueResolutions is a no-op when it is already queued.
+      try {
+        await prepareMediaCache(this.env.MEDIA_CACHE);
+        await enqueueResolutions(
+          this.env.MEDIA_CACHE,
+          [
+            {
+              kind: "backfill-liked-tracks",
+              subjectUri: "library",
+              priority: RESOLUTION_PRIORITY.BACKFILL,
+            },
+          ],
+          Date.now(),
+        );
+      } catch {
+        // A connection must not fail over background bookkeeping.
+      }
+
       await this.schedule(RESOLVER_FIRST_TICK_SECONDS, "continueResolving", undefined, {
         idempotent: true,
       });
@@ -192,7 +215,19 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
           this.props?.spotifyUserId ?? "",
           { clientId: this.env.SPOTIFY_CLIENT_ID, now: () => Date.now() },
         );
-        await runResolutionTask(database, new SpotifyApiClient(accessToken), task);
+        // The provider, not the raw client: a backfill page must go through
+        // the decorator's recording path, or the facts it exists to write
+        // would not be written.
+        const provider = new CachedMediaProvider(
+          new SpotifyProvider(accessToken),
+          database,
+        );
+        await runResolutionTask(
+          database,
+          new SpotifyApiClient(accessToken),
+          task,
+          provider,
+        );
       }
     } catch (error) {
       // A rate-limited resolver is making no progress, and ticking again

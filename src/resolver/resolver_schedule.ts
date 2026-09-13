@@ -10,14 +10,16 @@
 /**
  * Seconds between ticks while work remains.
  *
- * Each tick spends a handful of subrequests and the queue can hold thousands
- * of artists, so this is a background trickle rather than a race. Fifteen
- * seconds drains roughly two hundred and forty artists an hour on the
- * one-request album count — a first library scan settles within a day, and
- * the numbers a caller actually waits on (the liked-track counts) are already
- * there from the moment the library is read.
+ * Three seconds, because Idin's instruction was explicit: *"i don't mind if
+ * we get to the limits and have to wait"*. Backfilling a 2,282-track library
+ * and resolving a few hundred artists is work that has to happen once, and
+ * finishing it in an hour beats trickling it over a day.
+ *
+ * Hitting Spotify's rate limit is not a failure here — `RESOLVER_BACKOFF_SECONDS`
+ * handles it, and a limit reached while doing real work is cheaper than a
+ * queue that never empties.
  */
-export const RESOLVER_TICK_SECONDS = 15;
+export const RESOLVER_TICK_SECONDS = 3;
 
 /**
  * Seconds to wait after a rate-limit refusal.
