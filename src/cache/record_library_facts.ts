@@ -106,8 +106,13 @@ export async function recordTracks(
           liked,
           // No duration means no meaningful key — a title-only key would merge
           // the two Detroit Rock City versions Idin said must stay apart.
-          track.durationMs > 0
-            ? buildSongKey({ title: track.name, durationMs: track.durationMs })
+          track.isrc !== null || track.durationMs > 0
+            ? buildSongKey({
+                title: track.name,
+                durationMs: track.durationMs,
+                isrc: track.isrc,
+                artistUris: track.artists.map((artist) => artist.uri),
+              })
             : null,
           track.isrc,
           options.now,

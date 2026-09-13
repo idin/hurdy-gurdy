@@ -237,7 +237,35 @@ export const SAME_SONG_DURATION_TOLERANCE_SECONDS = 5;
  * @param track.durationMs - Its length.
  * @returns A key equal for two recordings that are one song.
  */
-export function buildSongKey(track: { title: string; durationMs: number }): string {
+export function buildSongKey(track: {
+  title: string;
+  durationMs: number;
+  /** The recording's ISRC, when the provider knows one. */
+  isrc?: string | null;
+  /** The performing artists' URIs, when known. */
+  artistUris?: string[];
+}): string {
+  // An ISRC identifies the recording itself, assigned by the label. Nothing
+  // derived from a title can beat it, so when one exists it IS the key.
+  //
+  // This matters more than it looks. Title-plus-duration merged EIGHT
+  // distinct recordings of "Windmills of Your Mind" — by different artists,
+  // in different countries, at 228-231 seconds — into one key, because
+  // different artists routinely record a song at a similar length. Measured
+  // on Idin's library, 2026-09-13: 68 keys over-merged that way.
+  if (track.isrc != null && track.isrc.length > 0) {
+    return `isrc:${track.isrc.toLowerCase()}`;
+  }
+
+  // No ISRC: fall back to title, duration AND artist. The artist is what
+  // keeps two performers' versions of one song apart, and leaving it out is
+  // exactly what produced the over-merging above.
+  const performers = [...(track.artistUris ?? [])].sort().join(",");
+  return `${buildTitleDurationKey(track)}|${performers}`;
+}
+
+/** Title and duration bucket alone, without any identity. */
+function buildTitleDurationKey(track: { title: string; durationMs: number }): string {
   const seconds = Math.round(track.durationMs / MILLISECONDS_PER_SECOND);
   const bucket = Math.round(seconds / SAME_SONG_DURATION_TOLERANCE_SECONDS);
   return `${normaliseReleaseTitle(track.title)}|${bucket}`;

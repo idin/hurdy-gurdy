@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  buildSongKey,
   buildWorkKey,
   isLiveRelease,
   normaliseReleaseTitle,
@@ -197,5 +198,96 @@ describe("leading article", () => {
 
   test("the is not stripped from inside a title", () => {
     expect(normaliseReleaseTitle("Dark Side of the Moon")).toContain("of the moon");
+  });
+});
+
+describe("song identity", () => {
+  test("an ISRC is the key when one exists", () => {
+    // The label's own identifier beats anything derived from a title.
+    expect(
+      buildSongKey({ title: "Windmills of Your Mind", durationMs: 228_000, isrc: "AULC00300020" }),
+    ).toBe("isrc:aulc00300020");
+  });
+
+  test("two recordings with different ISRCs never merge", () => {
+    // Real: eight recordings of Windmills of Your Mind, by different artists
+    // in different countries, all 228-231s, all merged into one key before
+    // this. Measured on Idin's library — 68 keys over-merged that way.
+    const australian = buildSongKey({
+      title: "Windmills of Your Mind",
+      durationMs: 228_000,
+      isrc: "AULC00300020",
+    });
+    const american = buildSongKey({
+      title: "Windmills of Your Mind",
+      durationMs: 228_000,
+      isrc: "USRC19900888",
+    });
+
+    expect(australian).not.toBe(american);
+  });
+
+  test("two pressings sharing an ISRC still merge", () => {
+    // The other direction must keep working: a remaster and its original are
+    // one recording and carry one ISRC.
+    expect(
+      buildSongKey({ title: "Detroit Rock City", durationMs: 318_000, isrc: "USPR37609134" }),
+    ).toBe(
+      buildSongKey({
+        title: "Detroit Rock City (2014 Remaster)",
+        durationMs: 319_000,
+        isrc: "USPR37609134",
+      }),
+    );
+  });
+
+  test("without an ISRC, the artist keeps two versions apart", () => {
+    // The fallback has to carry identity too, or it reproduces the bug.
+    expect(
+      buildSongKey({
+        title: "Windmills of Your Mind",
+        durationMs: 228_000,
+        artistUris: ["spotify:artist:a"],
+      }),
+    ).not.toBe(
+      buildSongKey({
+        title: "Windmills of Your Mind",
+        durationMs: 228_000,
+        artistUris: ["spotify:artist:b"],
+      }),
+    );
+  });
+
+  test("without an ISRC, one artist's two pressings still merge", () => {
+    expect(
+      buildSongKey({
+        title: "Detroit Rock City",
+        durationMs: 318_000,
+        artistUris: ["spotify:artist:kiss"],
+      }),
+    ).toBe(
+      buildSongKey({
+        title: "Detroit Rock City (Remaster)",
+        durationMs: 319_000,
+        artistUris: ["spotify:artist:kiss"],
+      }),
+    );
+  });
+
+  test("without an ISRC, different lengths stay apart", () => {
+    // Idin's Detroit Rock City rule, in the fallback path.
+    expect(
+      buildSongKey({
+        title: "Detroit Rock City",
+        durationMs: 318_000,
+        artistUris: ["spotify:artist:kiss"],
+      }),
+    ).not.toBe(
+      buildSongKey({
+        title: "Detroit Rock City",
+        durationMs: 228_000,
+        artistUris: ["spotify:artist:kiss"],
+      }),
+    );
   });
 });
