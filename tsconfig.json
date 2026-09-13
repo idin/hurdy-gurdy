@@ -4,7 +4,7 @@
     "lib": ["es2021"],
     "module": "es2022",
     "moduleResolution": "bundler",
-    "types": ["@cloudflare/workers-types", "node"],
+    "types": ["@cloudflare/workers-types"],
     "resolveJsonModule": true,
     "allowJs": true,
     "checkJs": false,
@@ -14,5 +14,9 @@
     "strict": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  // Tests are typechecked separately, by tests/tsconfig.json. Keeping them
+  // out here means `src/` compiles against the Workers types alone, so
+  // something that cannot exist in a Worker cannot reach production without
+  // the typechecker objecting — other-memory's split, for the same reason.
+  "include": ["src/**/*.ts"]
 }

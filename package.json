@@ -14,7 +14,7 @@
     "deploy": "wrangler deploy",
     "test": "vitest run --project worker --project repository",
     "test:integration": "vitest run --project integration",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tests/tsconfig.json"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^0.8.1",

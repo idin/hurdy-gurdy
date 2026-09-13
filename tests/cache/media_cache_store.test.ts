@@ -1,4 +1,4 @@
-import { env } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, test } from "vitest";
 
 import { buildCacheKey, CACHE_TIME_TO_LIVE_MILLISECONDS } from "../../src/cache/cache_entry";

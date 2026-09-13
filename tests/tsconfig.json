@@ -1,0 +1,14 @@
+{
+  // The tests need more than the source does: node, for the repository tests
+  // that shell out to git, and the vitest pool's own types for the
+  // `cloudflare:test` module that hands a test a real D1 binding.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": [
+      "@cloudflare/workers-types",
+      "node",
+      "@cloudflare/vitest-pool-workers/types"
+    ]
+  },
+  "include": ["**/*.ts"]
+}
