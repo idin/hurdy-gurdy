@@ -235,16 +235,16 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
       rateLimited = isSpotifyRateLimited(error);
     }
 
-    let hasWork = false;
+    let pending = 0;
     try {
-      hasWork = (await countPendingResolutions(database)).pending > 0;
+      pending = (await countPendingResolutions(database)).pending;
     } catch {
       // Unknown is treated as idle: a resolver that cannot read its own queue
-      // should back off rather than spin.
+      // should back off rather than spin, and spinning is what costs money.
     }
 
     await this.schedule(
-      findNextTickDelay({ hasWork, rateLimited }),
+      findNextTickDelay({ pending, rateLimited }),
       "continueResolving",
       undefined,
       { idempotent: true },
