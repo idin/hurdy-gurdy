@@ -4,6 +4,11 @@ export type Env = {
   SPOTIFY_CLIENT_ID: string;
   COOKIE_ENCRYPTION_KEY: string;
   /**
+   * Where the media cache lives. Optional: a deployment without a D1
+   * database gets an uncached but fully working server.
+   */
+  MEDIA_CACHE?: D1Database;
+  /**
    * Stores each user's Spotify refresh token, keyed by their Spotify user
    * id. Separate from OAUTH_KV, which belongs to the outer MCP OAuth layer
    * (`@cloudflare/workers-oauth-provider`) and is never touched by this

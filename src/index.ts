@@ -9,6 +9,7 @@ import {
   issueConfirmationToken,
   isValidConfirmation,
 } from "./confirmation";
+import { CachedMediaProvider } from "./cache/cached_media_provider";
 import { SpotifyProvider } from "./providers/spotify/spotify_provider";
 import {
   LIBRARY_WRITE_MAX_ITEMS,
@@ -61,7 +62,14 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
 
   protected failureSink: FailureSink = consoleFailureSink;
 
-  private async provider(): Promise<SpotifyProvider> {
+  /**
+   * The provider the tools call, wrapped in the cache when one is bound.
+   *
+   * The wrapping is conditional so the package still runs with no D1 binding
+   * — a deployment that has not created a database gets an uncached but fully
+   * working server, rather than a startup failure over an optimisation.
+   */
+  private async provider(): Promise<MediaProvider> {
     if (!this.props?.spotifyUserId) {
       throw new Error("Not authenticated with Spotify.");
     }
@@ -69,7 +77,10 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
       clientId: this.env.SPOTIFY_CLIENT_ID,
       now: () => Date.now(),
     });
-    return new SpotifyProvider(accessToken);
+    const spotify = new SpotifyProvider(accessToken);
+    return this.env.MEDIA_CACHE === undefined
+      ? spotify
+      : new CachedMediaProvider(spotify, this.env.MEDIA_CACHE);
   }
 
   /**
@@ -190,7 +201,7 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
 
   /** Dispatch one library kind to its provider method. */
   private async readLibrary(
-    provider: SpotifyProvider,
+    provider: MediaProvider,
     type: (typeof LIBRARY_TYPES)[number],
     options: { limit?: number; cursor?: string },
   ) {
@@ -549,16 +560,16 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
         const deviceId = device_id;
         switch (action) {
           case "pause":
-            await provider.pause({ deviceId });
+            await provider.pause!({ deviceId });
             break;
           case "resume":
-            await provider.play({ deviceId });
+            await provider.play!({ deviceId });
             break;
           case "next":
-            await provider.skipToNext({ deviceId });
+            await provider.skipToNext!({ deviceId });
             break;
           case "previous":
-            await provider.skipToPrevious({ deviceId });
+            await provider.skipToPrevious!({ deviceId });
             break;
         }
         return { content: [{ type: "text" as const, text: `Playback: ${action}.` }] };
@@ -576,7 +587,7 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
       },
       async () => {
         const provider = await this.provider();
-        const queue = await provider.getQueue();
+        const queue = await provider.getQueue!();
         return { content: [{ type: "text" as const, text: JSON.stringify(queue, null, 2) }] };
       },
     );
@@ -598,7 +609,7 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
       },
       async ({ uri, device_id }) => {
         const provider = await this.provider();
-        await provider.addToQueue(uri, { deviceId: device_id });
+        await provider.addToQueue!(uri, { deviceId: device_id });
         return { content: [{ type: "text" as const, text: `Queued ${uri}.` }] };
       },
     );

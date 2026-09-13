@@ -283,6 +283,18 @@ export interface MediaProvider {
 
   /** Move playback to another device. */
   transferPlayback?(deviceId: string, options?: { play?: boolean }): Promise<void>;
+
+  /**
+   * What is playing now and what is queued after it.
+   *
+   * Spotify publishes no endpoint to remove a queued item or reorder the
+   * queue, so there is deliberately no counterpart to `addToQueue` here —
+   * checked 2026-09-13.
+   */
+  getQueue?(): Promise<{ nowPlaying: Track | null; queue: Track[] }>;
+
+  /** Add one item to the end of the playback queue. */
+  addToQueue?(uri: string, options?: { deviceId?: string }): Promise<void>;
 }
 
 /** A device playback can be sent to. */
