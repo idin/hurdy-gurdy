@@ -14,9 +14,24 @@
  * read, and SQLite is fast enough at this scale that the cost is not worth
  * discussing.
  *
- * Schema creation is idempotent: every statement is `IF NOT EXISTS`, so
- * running it on every cold start is safe and no migration runner is needed
- * for the initial shape.
+ * Schema creation is idempotent, but tables and views get there differently.
+ *
+ * **Tables** are `CREATE TABLE IF NOT EXISTS` — an existing one is left
+ * alone, because it holds rows. Changing a table's shape is what
+ * `apply_migrations.ts` is for.
+ *
+ * **Views** are `DROP VIEW IF EXISTS` immediately followed by `CREATE VIEW`,
+ * as an adjacent pair. A view holds nothing, so rebuilding it costs nothing —
+ * and it is the only schema object whose *definition* can change in place, so
+ * `IF NOT EXISTS` would pin a live database to whatever definition it first
+ * saw. The pair makes a changed view reach production on the next start.
+ *
+ * The drop belongs **here, beside its own create**, and never in the
+ * migration list. Migrations run after this batch, so a `DROP VIEW` there
+ * removes what this step just built — on every startup, not once. That
+ * happened on 2026-09-18 and left every metric unqueryable in production
+ * while all 321 tests passed. See
+ * `docs/bugs/resolved/2026-09-18_a_drop_view_migration_destroys_the_view_on_every_startup.md`.
  */
 
 import { DEFAULT_LENGTH_WEIGHT_EXPONENT } from "../metrics/duration_weighted_completion";
@@ -289,7 +304,8 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
    * because the cache may hold only the liked tracks from an album — counting
    * rows would make every partially-cached album look complete.
    */
-  `CREATE VIEW IF NOT EXISTS album_coverage AS
+  `DROP VIEW IF EXISTS album_coverage`,
+  `CREATE VIEW album_coverage AS
      SELECT
        album.uri                                   AS album_uri,
        COUNT(CASE WHEN track.is_liked = 1 THEN 1 END) AS liked_track_count,
@@ -308,7 +324,8 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
    * from each of forty albums, and a track count alone cannot tell them
    * apart.
    */
-  `CREATE VIEW IF NOT EXISTS artist_coverage AS
+  `DROP VIEW IF EXISTS artist_coverage`,
+  `CREATE VIEW artist_coverage AS
      SELECT
        artist.uri                                     AS artist_uri,
        COUNT(DISTINCT CASE WHEN track.is_liked = 1
@@ -335,7 +352,8 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
    * The canonical version is the most recent release, which is the newest
    * master and what Spotify itself surfaces first.
    */
-  `CREATE VIEW IF NOT EXISTS album_work AS
+  `DROP VIEW IF EXISTS album_work`,
+  `CREATE VIEW album_work AS
      SELECT
        album.work_key                                       AS work_key,
        MIN(album.name)                                      AS name,
@@ -354,7 +372,8 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
    * song across every master, counted once each. Without DISTINCT, liking the
    * same song on two remasters would read as two liked tracks.
    */
-  `CREATE VIEW IF NOT EXISTS work_coverage AS
+  `DROP VIEW IF EXISTS work_coverage`,
+  `CREATE VIEW work_coverage AS
      SELECT
        album.work_key                                        AS work_key,
        COUNT(DISTINCT CASE WHEN track.is_liked = 1
@@ -379,7 +398,8 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
    * The work key carries liveness in its second field, so the studio twin of
    * a live work is the same key with `|live|` replaced by `|studio|`.
    */
-  `CREATE VIEW IF NOT EXISTS countable_work AS
+  `DROP VIEW IF EXISTS countable_work`,
+  `CREATE VIEW countable_work AS
      SELECT work_key
        FROM album_work AS this
       WHERE this.work_key NOT LIKE '%|live|%'
@@ -420,7 +440,8 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
    * the same reason the ratio is — a row logging 300 seconds against a
    * 100-second song would otherwise report listening that did not happen.
    */
-  `CREATE VIEW IF NOT EXISTS track_plays AS
+  `DROP VIEW IF EXISTS track_plays`,
+  `CREATE VIEW track_plays AS
      SELECT
        track.uri                                            AS track_uri,
        COUNT(play.track_uri)                                AS play_count,
@@ -463,7 +484,8 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
    * A caller asking "where do I already have this?" gets one row rather than
    * a second query per track.
    */
-  `CREATE VIEW IF NOT EXISTS track_playlist_membership AS
+  `DROP VIEW IF EXISTS track_playlist_membership`,
+  `CREATE VIEW track_playlist_membership AS
      SELECT
        playlist_track.track_uri                        AS track_uri,
        COUNT(*)                                        AS playlist_count,

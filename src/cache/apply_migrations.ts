@@ -23,6 +23,18 @@
  * Deliberately limited to adding columns and indexes. A migration that
  * rewrites or drops data needs a human deciding when it runs, and putting
  * one here would mean it fires on a cold start with nobody watching.
+ *
+ * **No `DROP` belongs here, for a reason beyond data loss.** Migrations run
+ * *after* `MEDIA_CACHE_SCHEMA` creates everything, so a `DROP` in this list
+ * removes what the schema step just built — unconditionally, on every
+ * startup, not once. A `DROP VIEW IF EXISTS track_plays` entry was added on
+ * 2026-09-18 with the argument that a view holds no data, which was true and
+ * beside the point: it destroyed the metrics view on every cold start and
+ * made every metric unqueryable in production while all 321 tests passed.
+ *
+ * A view whose definition needs to change is handled in the schema itself,
+ * where its `DROP` sits immediately before its own `CREATE`. See
+ * `media_cache_schema.ts`.
  */
 export type Migration = {
   /** What it does, in words, for whoever reads a failure. */
@@ -74,20 +86,6 @@ export const MIGRATIONS: readonly Migration[] = [
   {
     description: "track gains work_title",
     statement: "ALTER TABLE track ADD COLUMN work_title TEXT",
-  },
-  {
-    /*
-     * The one non-additive entry, and it is allowed because a view holds no
-     * data. `track_plays` moved from reading `song_plays` counts to computing
-     * every metric from `play` rows; `CREATE VIEW IF NOT EXISTS` would leave
-     * the old definition in place on a live database, so it is dropped first.
-     *
-     * Dropping `song_plays` itself is NOT here. That destroys rows, which the
-     * type comment above rules out of this list on purpose — it is done once,
-     * by hand, after the play rows are verified in place.
-     */
-    description: "track_plays is replaced by the per-play metrics view",
-    statement: "DROP VIEW IF EXISTS track_plays",
   },
 ];
 
