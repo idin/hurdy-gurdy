@@ -45,7 +45,7 @@ async function seedAlbum(options: {
   for (let index = 1; index <= options.total; index += 1) {
     const trackUri = `${options.albumUri}:t${index}`;
     await database
-      .prepare(`INSERT INTO track (uri, id, name, album_uri, duration_ms, is_liked, liked_at, cached_at) VALUES (?, 't', 'A Track', ?, 200000, ?, NULL, ?)`)
+      .prepare(`INSERT INTO track (uri, id, name, album_uri, duration_seconds, is_liked, liked_at, cached_at) VALUES (?, 't', 'A Track', ?, 200, ?, NULL, ?)`)
       .bind(trackUri, options.albumUri, index <= options.liked ? 1 : 0, NOW)
       .run();
     await database
@@ -348,7 +348,7 @@ describe("playlist membership", () => {
   test("reports every playlist holding a track", async () => {
     // The state Spotify has no endpoint for: in playlists, never liked.
     await database
-      .prepare(`INSERT INTO track (uri, id, name, album_uri, duration_ms, is_liked, liked_at, cached_at) VALUES ('spotify:track:t1','t','T',NULL,1,0,NULL,?)`)
+      .prepare(`INSERT INTO track (uri, id, name, album_uri, duration_seconds, is_liked, liked_at, cached_at) VALUES ('spotify:track:t1','t','T',NULL,1,0,NULL,?)`)
       .bind(NOW)
       .run();
     for (const playlist of ["spotify:playlist:p1", "spotify:playlist:p2"]) {

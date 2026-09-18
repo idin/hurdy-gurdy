@@ -205,7 +205,7 @@ describe("song identity", () => {
   test("an ISRC is the key when one exists", () => {
     // The label's own identifier beats anything derived from a title.
     expect(
-      buildSongKey({ title: "Windmills of Your Mind", durationMs: 228_000, isrc: "AULC00300020" }),
+      buildSongKey({ title: "Windmills of Your Mind", durationSeconds: 228, isrc: "AULC00300020" }),
     ).toBe("isrc:aulc00300020");
   });
 
@@ -215,12 +215,12 @@ describe("song identity", () => {
     // this. Measured on Idin's library — 68 keys over-merged that way.
     const australian = buildSongKey({
       title: "Windmills of Your Mind",
-      durationMs: 228_000,
+      durationSeconds: 228,
       isrc: "AULC00300020",
     });
     const american = buildSongKey({
       title: "Windmills of Your Mind",
-      durationMs: 228_000,
+      durationSeconds: 228,
       isrc: "USRC19900888",
     });
 
@@ -231,11 +231,11 @@ describe("song identity", () => {
     // The other direction must keep working: a remaster and its original are
     // one recording and carry one ISRC.
     expect(
-      buildSongKey({ title: "Detroit Rock City", durationMs: 318_000, isrc: "USPR37609134" }),
+      buildSongKey({ title: "Detroit Rock City", durationSeconds: 318, isrc: "USPR37609134" }),
     ).toBe(
       buildSongKey({
         title: "Detroit Rock City (2014 Remaster)",
-        durationMs: 319_000,
+        durationSeconds: 319,
         isrc: "USPR37609134",
       }),
     );
@@ -246,13 +246,13 @@ describe("song identity", () => {
     expect(
       buildSongKey({
         title: "Windmills of Your Mind",
-        durationMs: 228_000,
+        durationSeconds: 228,
         artistUris: ["spotify:artist:a"],
       }),
     ).not.toBe(
       buildSongKey({
         title: "Windmills of Your Mind",
-        durationMs: 228_000,
+        durationSeconds: 228,
         artistUris: ["spotify:artist:b"],
       }),
     );
@@ -262,13 +262,13 @@ describe("song identity", () => {
     expect(
       buildSongKey({
         title: "Detroit Rock City",
-        durationMs: 318_000,
+        durationSeconds: 318,
         artistUris: ["spotify:artist:kiss"],
       }),
     ).toBe(
       buildSongKey({
         title: "Detroit Rock City (Remaster)",
-        durationMs: 319_000,
+        durationSeconds: 319,
         artistUris: ["spotify:artist:kiss"],
       }),
     );
@@ -279,13 +279,13 @@ describe("song identity", () => {
     expect(
       buildSongKey({
         title: "Detroit Rock City",
-        durationMs: 318_000,
+        durationSeconds: 318,
         artistUris: ["spotify:artist:kiss"],
       }),
     ).not.toBe(
       buildSongKey({
         title: "Detroit Rock City",
-        durationMs: 228_000,
+        durationSeconds: 228,
         artistUris: ["spotify:artist:kiss"],
       }),
     );

@@ -26,7 +26,7 @@ async function addAlbum(uri: string, name: string, date: string, tracks: number,
 
 async function addTrack(uri: string, songKey: string, albumUri: string, isLiked: boolean) {
   await database
-    .prepare(`INSERT INTO track (uri, id, name, album_uri, duration_ms, is_liked, liked_at, song_key, cached_at)
+    .prepare(`INSERT INTO track (uri, id, name, album_uri, duration_seconds, is_liked, liked_at, song_key, cached_at)
        VALUES (?, ?, ?, ?, 200000, ?, NULL, ?, ?)`)
     .bind(uri, uri.slice(-6), songKey, albumUri, isLiked ? 1 : 0, songKey, NOW)
     .run();

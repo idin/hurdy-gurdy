@@ -37,7 +37,7 @@ function trackPage(): Page<Track> {
         albumName: null,
         albumUri: null,
         albumTrackCount: null,
-        durationMs: 1,
+        durationSeconds: 1,
         isrc: null,
       },
     ],

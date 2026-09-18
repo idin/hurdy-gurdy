@@ -9,6 +9,15 @@ export type Env = {
    */
   MEDIA_CACHE?: D1Database;
   /**
+   * A ListenBrainz user token, for mapping track names onto MusicBrainz ids.
+   *
+   * Optional, and the resolver degrades rather than fails without it: it
+   * falls back to MusicBrainz directly, which answers the same question at
+   * one request per second instead of thirty per nine. Correct either way,
+   * roughly thirty times slower.
+   */
+  LISTENBRAINZ_USER_TOKEN?: string;
+  /**
    * Stores each user's Spotify refresh token, keyed by their Spotify user
    * id. Separate from OAUTH_KV, which belongs to the outer MCP OAuth layer
    * (`@cloudflare/workers-oauth-provider`) and is never touched by this

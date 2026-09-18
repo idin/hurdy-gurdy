@@ -132,8 +132,8 @@ export function findRateLimitDelay(headers: Headers): number {
   // One spare request is kept in hand, so a concurrent caller — the resolver
   // alarm, say — does not push the count past zero between our check and our
   // next call.
-  return remaining > 1 ? 0 : Math.max(0, resetIn * 1000) + RESET_MARGIN_MS;
+  return remaining > 1 ? 0 : Math.max(0, resetIn * 1000) + RESET_MARGIN_MILLISECONDS;
 }
 
 /** Added to a reported reset, since the window boundary is not exact. */
-const RESET_MARGIN_MS = 500;
+const RESET_MARGIN_MILLISECONDS = 500;

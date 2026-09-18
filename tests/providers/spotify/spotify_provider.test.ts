@@ -159,7 +159,7 @@ describe("SpotifyProvider.getLikedTracks", () => {
         albumName: "OK Computer",
         albumUri: "spotify:album:album-1",
         albumTrackCount: null,
-        durationMs: 261973,
+        durationSeconds: 261.973,
         isrc: null,
         uri: "spotify:track:track-1",
         // A liked track IS the library for tracks — Liked Songs and saved
@@ -281,7 +281,7 @@ describe("SpotifyProvider.getPlaylistTracks", () => {
         albumName: "OK Computer",
         albumUri: "spotify:album:album-1",
         albumTrackCount: null,
-        durationMs: 261973,
+        durationSeconds: 261.973,
         isrc: null,
         uri: "spotify:track:track-1",
         // FALSE, deliberately. A track in a playlist is not necessarily
@@ -327,5 +327,60 @@ describe("SpotifyProvider.search", () => {
 
     const requestedUrl = (fetchSpy as ReturnType<typeof vi.fn>).mock.calls[0][0] as URL;
     expect(requestedUrl.searchParams.get("q")).toBe("artist:Radiohead track:Karma Police");
+  });
+});
+
+/**
+ * The unit boundary.
+ *
+ * Spotify sends milliseconds on every duration and position; everything above
+ * this provider speaks seconds. These assert the conversion actually happens,
+ * because a rename that broke `progress_ms` passed both typecheck and the
+ * whole suite — nothing read the field, so nothing noticed.
+ */
+describe("SpotifyProvider unit conversion", () => {
+  test("converts a track's duration_ms to seconds", async () => {
+    globalThis.fetch = fakeSpotifyFetch(SAVED_TRACKS_RESPONSE);
+    const provider = new SpotifyProvider("test-token");
+
+    const page = await provider.getLikedTracks();
+
+    // 261,973 ms is 261.973 s, kept fractional: the completion ratios divide
+    // by this, and rounding would put error into every one of them.
+    expect(page.items[0].durationSeconds).toBe(261.973);
+  });
+
+  test("converts playback progress_ms to seconds", async () => {
+    globalThis.fetch = fakeSpotifyFetch({
+      is_playing: true,
+      progress_ms: 45_000,
+      item: {
+        id: "track-1",
+        name: "Karma Police",
+        artists: [{ id: "artist-1", name: "Radiohead" }],
+        album: { id: "album-1", name: "OK Computer" },
+        duration_ms: 261973,
+        uri: "spotify:track:track-1",
+      },
+      device: { id: "device-1", name: "Phone", type: "Smartphone", is_active: true, is_restricted: false, volume_percent: 50 },
+    });
+    const provider = new SpotifyProvider("test-token");
+
+    const nowPlaying = await provider.getCurrentlyPlaying();
+
+    expect(nowPlaying?.progressSeconds).toBe(45);
+  });
+
+  test("keeps a null progress null rather than converting it to zero", async () => {
+    globalThis.fetch = fakeSpotifyFetch({
+      is_playing: false,
+      progress_ms: null,
+      item: null,
+    });
+    const provider = new SpotifyProvider("test-token");
+
+    const nowPlaying = await provider.getCurrentlyPlaying();
+
+    expect(nowPlaying?.progressSeconds).toBeNull();
   });
 });

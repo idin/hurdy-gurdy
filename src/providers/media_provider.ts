@@ -103,7 +103,21 @@ export type Track = LibraryMembership & {
    * read supplies album coverage denominators without a second fetch.
    */
   albumTrackCount: number | null;
-  durationMs: number;
+  /**
+   * The track's length in **seconds**, fractional.
+   *
+   * Seconds throughout this codebase, converted once where a provider's
+   * response is mapped. Spotify sends `duration_seconds` and that field keeps its
+   * name in the API types, because it is Spotify's field and renaming it
+   * would make their response harder to check against their documentation.
+   * Everything downstream of the mapper is seconds.
+   *
+   * Fractional rather than whole, because the completion ratios divide by
+   * this. Rounding 234,840 ms to 235 seconds would put 3.4% of error into a
+   * 29-second track's ratio — precision discarded for a rounder-looking
+   * number.
+   */
+  durationSeconds: number;
   /**
    * The recording's ISRC, when the provider knows one.
    *
@@ -340,7 +354,7 @@ export type Device = {
 export type NowPlaying = {
   isPlaying: boolean;
   track: Track | null;
-  progressMs: number | null;
+  progressSeconds: number | null;
   deviceName: string | null;
 };
 
@@ -365,13 +379,13 @@ export async function fetchAllPages<Item>(
 ): Promise<Item[]> {
   const items: Item[] = [];
   let cursor: string | undefined;
-  for (let page = 0; page < options.maxPages; page += 1) {
-    const result = await fetchPage(cursor);
-    items.push(...result.items);
-    if (result.nextCursor === null) {
+  for (let pageNumber = 0; pageNumber < options.maxPages; pageNumber += 1) {
+    const page = await fetchPage(cursor);
+    items.push(...page.items);
+    if (page.nextCursor === null) {
       return items;
     }
-    cursor = result.nextCursor;
+    cursor = page.nextCursor;
   }
   throw new Error(
     `fetchAllPages did not terminate within ${options.maxPages} pages. `

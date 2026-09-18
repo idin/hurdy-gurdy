@@ -9,6 +9,16 @@
 
 const SPOTIFY_API_BASE = "https://api.spotify.com/v1";
 
+/**
+ * Divisor between Spotify's wire unit and this codebase's.
+ *
+ * Spotify reports and accepts milliseconds — `duration_ms`, `position_ms`,
+ * `progress_ms`. Everything above this client speaks seconds, so the two
+ * conversions live at the boundary: here for what is sent, and in
+ * `spotify_provider.ts` for what is read.
+ */
+const MILLISECONDS_PER_SECOND = 1000;
+
 /** The maximum `limit` Spotify's search endpoint accepts, per item type. */
 export const SEARCH_MAX_LIMIT = 10;
 
@@ -202,9 +212,9 @@ export class SpotifyApiClient {
     this.accessToken = accessToken;
   }
 
-  private async get<Result>(path: string, params: Record<string, string | number | undefined>): Promise<Result> {
+  private async get<Result>(path: string, parameters: Record<string, string | number | undefined>): Promise<Result> {
     const url = new URL(`${SPOTIFY_API_BASE}${path}`);
-    for (const [key, value] of Object.entries(params)) {
+    for (const [key, value] of Object.entries(parameters)) {
       if (value !== undefined) {
         url.searchParams.set(key, String(value));
       }
@@ -238,7 +248,7 @@ export class SpotifyApiClient {
    * @param method - `PUT`, `POST` or `DELETE`.
    * @param path - API path below `/v1`.
    * @param options.body - JSON body, when the endpoint takes one.
-   * @param options.params - Query parameters, when the endpoint takes them.
+   * @param options.parameters - Query parameters, when the endpoint takes them.
    * @returns The parsed body, or null when the response carried none.
    */
   private async write<Result>(
@@ -246,11 +256,11 @@ export class SpotifyApiClient {
     path: string,
     options: {
       body?: unknown;
-      params?: Record<string, string | number | undefined>;
+      parameters?: Record<string, string | number | undefined>;
     } = {},
   ): Promise<Result | null> {
     const url = new URL(`${SPOTIFY_API_BASE}${path}`);
-    for (const [key, value] of Object.entries(options.params ?? {})) {
+    for (const [key, value] of Object.entries(options.parameters ?? {})) {
       if (value !== undefined) {
         url.searchParams.set(key, String(value));
       }
@@ -445,7 +455,7 @@ export class SpotifyApiClient {
    *   `LIBRARY_WRITE_MAX_ITEMS`.
    */
   async saveToLibrary(uris: string[]): Promise<null> {
-    return this.write("PUT", "/me/library", { params: { uris: uris.join(",") } });
+    return this.write("PUT", "/me/library", { parameters: { uris: uris.join(",") } });
   }
 
   /**
@@ -457,7 +467,7 @@ export class SpotifyApiClient {
    * Guarded by two-step confirmation at the tool layer.
    */
   async removeFromLibrary(uris: string[]): Promise<null> {
-    return this.write("DELETE", "/me/library", { params: { uris: uris.join(",") } });
+    return this.write("DELETE", "/me/library", { parameters: { uris: uris.join(",") } });
   }
 
   /** GET /v1/me/player/currently-playing. Scope: user-read-currently-playing. */
@@ -532,7 +542,7 @@ export class SpotifyApiClient {
    */
   async addToQueue(uri: string, options: { deviceId?: string } = {}): Promise<null> {
     return this.write("POST", "/me/player/queue", {
-      params: { uri, device_id: options.deviceId },
+      parameters: { uri, device_id: options.deviceId },
     });
   }
 
@@ -557,7 +567,7 @@ export class SpotifyApiClient {
     contextUri?: string;
     uris?: string[];
     deviceId?: string;
-    positionMs?: number;
+    positionSeconds?: number;
   } = {}): Promise<null> {
     const body: Record<string, unknown> = {};
     if (options.contextUri !== undefined) {
@@ -566,28 +576,30 @@ export class SpotifyApiClient {
     if (options.uris !== undefined) {
       body.uris = options.uris;
     }
-    if (options.positionMs !== undefined) {
-      body.position_ms = options.positionMs;
+    if (options.positionSeconds !== undefined) {
+      // Spotify's wire field is `position_ms` and takes milliseconds. Our
+      // callers speak seconds, so the conversion happens here at the boundary.
+      body.position_ms = Math.round(options.positionSeconds * MILLISECONDS_PER_SECOND);
     }
     return this.write("PUT", "/me/player/play", {
       body: Object.keys(body).length === 0 ? undefined : body,
-      params: { device_id: options.deviceId },
+      parameters: { device_id: options.deviceId },
     });
   }
 
   /** PUT /v1/me/player/pause. Scope: user-modify-playback-state. Premium only. */
   async pause(options: { deviceId?: string } = {}): Promise<null> {
-    return this.write("PUT", "/me/player/pause", { params: { device_id: options.deviceId } });
+    return this.write("PUT", "/me/player/pause", { parameters: { device_id: options.deviceId } });
   }
 
   /** POST /v1/me/player/next. Scope: user-modify-playback-state. Premium only. */
   async skipToNext(options: { deviceId?: string } = {}): Promise<null> {
-    return this.write("POST", "/me/player/next", { params: { device_id: options.deviceId } });
+    return this.write("POST", "/me/player/next", { parameters: { device_id: options.deviceId } });
   }
 
   /** POST /v1/me/player/previous. Scope: user-modify-playback-state. Premium only. */
   async skipToPrevious(options: { deviceId?: string } = {}): Promise<null> {
-    return this.write("POST", "/me/player/previous", { params: { device_id: options.deviceId } });
+    return this.write("POST", "/me/player/previous", { parameters: { device_id: options.deviceId } });
   }
 
   /**

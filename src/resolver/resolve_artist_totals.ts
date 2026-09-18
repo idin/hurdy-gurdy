@@ -21,9 +21,15 @@
 import type { MediaProvider } from "../providers/media_provider";
 import {
   findRecordingByIsrc,
+  findRecordingDetail,
   isMusicBrainzBusy,
   searchRecording,
+  type MusicBrainzRecording,
 } from "../catalogue/musicbrainz_client";
+import {
+  isListenBrainzRateLimited,
+  mapRecording,
+} from "../catalogue/listenbrainz_client";
 import type { SpotifyApiClient } from "../providers/spotify/spotify_api_client";
 import {
   advanceResolution,
@@ -82,6 +88,7 @@ export async function runResolutionTask(
   client: SpotifyApiClient,
   task: ResolutionTask,
   provider?: MediaProvider,
+  listenBrainzToken?: string,
 ): Promise<{ outcome: "completed" | "advanced" | "failed" }> {
   try {
     if (task.kind === "backfill-liked-tracks") {
@@ -92,7 +99,7 @@ export async function runResolutionTask(
       return { outcome: finished ? "completed" : "advanced" };
     }
     if (task.kind === "resolve-musicbrainz") {
-      await resolveMusicBrainzIdentity(database, task);
+      await resolveMusicBrainzIdentity(database, task, listenBrainzToken);
       return { outcome: "completed" };
     }
     if (task.kind === "artist-album-count") {
@@ -228,23 +235,45 @@ async function advanceLikedTracksBackfill(
 /**
  * Fill in one track's MusicBrainz identity.
  *
- * Writes the recording and work ids when MusicBrainz knows them, and marks
- * the task complete either way — **including when there is no work
- * relation**. That absence is an answer: recording-to-work is among the least
- * complete relations in a crowd-sourced database, and retrying a track whose
- * link simply does not exist would spend the one-per-second budget
- * rediscovering nothing, forever.
+ * **ListenBrainz first, MusicBrainz only for the work relation.** Both serve
+ * the same catalogue, but their rate limits differ by two orders of
+ * magnitude: MusicBrainz documents one request per second globally per IP and
+ * in practice refused sustained traffic at 1.1s, 2s and 4s spacing, while
+ * ListenBrainz allows 30 requests per rolling nine seconds.
  *
- * A 503 is different and is allowed to throw, so the task is retried: it
- * means the question was never asked rather than answered with silence.
+ * That difference is why this function was rewritten on 2026-09-18. It had
+ * called MusicBrainz directly since it was written, which is why 1,979 queued
+ * tracks would have taken over half an hour of unbroken 503-prone crawling —
+ * and why `listenbrainz_client.ts` existed, unused, having been built for
+ * exactly this.
+ *
+ * The division of labour:
+ *
+ * | Step | Service | Why |
+ * | --- | --- | --- |
+ * | name → recording MBID | ListenBrainz `metadata/lookup` | Fast, and built for messy names |
+ * | recording MBID → work | MusicBrainz `recording?inc=work-rels` | ListenBrainz does not return it |
+ *
+ * The second step is skipped entirely when the first misses, so a miss costs
+ * one fast request rather than one slow one.
+ *
+ * Marks the task complete **including when there is no work relation**. That
+ * absence is an answer: recording-to-work is among the least complete
+ * relations in a crowd-sourced database, and retrying a track whose link
+ * simply does not exist would rediscover nothing, forever.
+ *
+ * A rate-limit refusal is different and is allowed to throw, so the task is
+ * retried: it means the question was never asked rather than answered with
+ * silence.
  */
 async function resolveMusicBrainzIdentity(
   database: D1Database,
   task: ResolutionTask,
+  listenBrainzToken?: string,
 ): Promise<void> {
   const row = await database
     .prepare(
-      `SELECT t.isrc, t.name, t.duration_ms, MIN(a.name) AS artist_name
+      `SELECT t.isrc, t.name, t.duration_seconds, MIN(a.name) AS artist_name
          FROM track t
          LEFT JOIN track_artist ta ON ta.track_uri = t.uri
          LEFT JOIN artist a ON a.uri = ta.artist_uri
@@ -255,7 +284,7 @@ async function resolveMusicBrainzIdentity(
     .first<{
       isrc: string | null;
       name: string;
-      duration_ms: number | null;
+      duration_seconds: number | null;
       artist_name: string | null;
     }>();
 
@@ -265,34 +294,73 @@ async function resolveMusicBrainzIdentity(
   }
 
   try {
-    let recording = row.isrc == null ? null : await findRecordingByIsrc(row.isrc);
+    let recordingMbid: string | null = null;
 
-    // The ISRC index is markedly less complete than the database itself —
-    // "Ace of Spades" has no ISRC match at all — so a miss falls back to
+    // ListenBrainz first: 30 requests per nine seconds against MusicBrainz's
+    // one per second, and its mapper is built for exactly the mis-spelled,
+    // differently-punctuated names a real library contains.
+    if (listenBrainzToken !== undefined && row.artist_name !== null) {
+      const mapped = await mapRecording(
+        { artistName: row.artist_name, recordingName: row.name },
+        listenBrainzToken,
+      );
+      recordingMbid = mapped?.recordingMbid ?? null;
+    }
+
+    // MusicBrainz only when ListenBrainz could not be used or did not match.
+    // Its ISRC index is markedly less complete than the database itself —
+    // "Ace of Spades" has no ISRC entry at all — so a miss falls back to
     // searching by title, artist and length rather than giving up.
-    if (recording === null && row.artist_name !== null && row.duration_ms !== null) {
-      recording = await searchRecording({
-        title: row.name,
-        artistName: row.artist_name,
-        durationMs: row.duration_ms,
-      });
+    if (recordingMbid === null) {
+      let recording = row.isrc == null ? null : await findRecordingByIsrc(row.isrc);
+      if (recording === null && row.artist_name !== null && row.duration_seconds !== null) {
+        recording = await searchRecording({
+          title: row.name,
+          artistName: row.artist_name,
+          durationSeconds: row.duration_seconds,
+        });
+      }
+      if (recording !== null) {
+        await writeRecordingIdentity(database, task.subjectUri, recording);
+      }
+      await completeResolution(database, task);
+      return;
     }
 
-    if (recording !== null) {
-      await database
-        .prepare(
-          `UPDATE track SET recording_mbid = ?, work_mbid = ?, work_title = ? WHERE uri = ?`,
-        )
-        .bind(recording.mbid, recording.workMbid, recording.workTitle, task.subjectUri)
-        .run();
-    }
+    // ListenBrainz returns the recording but never the work relation, so the
+    // composition still needs one MusicBrainz call. It is the only one made
+    // on this path, and only for tracks that actually matched.
+    const detail = await findRecordingDetail(recordingMbid);
+    await writeRecordingIdentity(database, task.subjectUri, detail);
     await completeResolution(database, task);
   } catch (error) {
-    if (isMusicBrainzBusy(error)) {
+    if (isMusicBrainzBusy(error) || isListenBrainzRateLimited(error)) {
       // Rate-limited: the question was never asked, so it is not answered.
       throw error;
     }
-    // Anything else is an answer — MusicBrainz does not know this track.
+    // Anything else is an answer — the catalogue does not know this track.
     await completeResolution(database, task);
   }
+}
+
+/**
+ * Write a resolved recording's identity onto the track.
+ *
+ * Extracted because both the ListenBrainz and MusicBrainz paths end here, and
+ * two copies of an UPDATE that names four columns is two places for them to
+ * drift apart.
+ *
+ * @param database - Where the cache lives.
+ * @param trackUri - The track being identified.
+ * @param recording - What the catalogue returned.
+ */
+async function writeRecordingIdentity(
+  database: D1Database,
+  trackUri: string,
+  recording: MusicBrainzRecording,
+): Promise<void> {
+  await database
+    .prepare(`UPDATE track SET recording_mbid = ?, work_mbid = ?, work_title = ? WHERE uri = ?`)
+    .bind(recording.mbid, recording.workMbid, recording.workTitle, trackUri)
+    .run();
 }

@@ -234,12 +234,12 @@ export const SAME_SONG_DURATION_TOLERANCE_SECONDS = 5;
  * boundary case is rare and the pin exists for when it happens.
  *
  * @param track.title - The recording's title.
- * @param track.durationMs - Its length.
+ * @param track.durationSeconds - Its length.
  * @returns A key equal for two recordings that are one song.
  */
 export function buildSongKey(track: {
   title: string;
-  durationMs: number;
+  durationSeconds: number;
   /** The recording's ISRC, when the provider knows one. */
   isrc?: string | null;
   /** The performing artists' URIs, when known. */
@@ -265,10 +265,7 @@ export function buildSongKey(track: {
 }
 
 /** Title and duration bucket alone, without any identity. */
-function buildTitleDurationKey(track: { title: string; durationMs: number }): string {
-  const seconds = Math.round(track.durationMs / MILLISECONDS_PER_SECOND);
-  const bucket = Math.round(seconds / SAME_SONG_DURATION_TOLERANCE_SECONDS);
+function buildTitleDurationKey(track: { title: string; durationSeconds: number }): string {
+  const bucket = Math.round(track.durationSeconds / SAME_SONG_DURATION_TOLERANCE_SECONDS);
   return `${normaliseReleaseTitle(track.title)}|${bucket}`;
 }
-
-const MILLISECONDS_PER_SECOND = 1000;

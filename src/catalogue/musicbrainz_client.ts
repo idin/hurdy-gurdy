@@ -176,7 +176,15 @@ async function requestJson<Result>(path: string, fetcher: typeof fetch): Promise
  * key, deliberately: the two answer the same question and disagreeing would
  * let a track match a recording its own key says is a different song.
  */
-export const SEARCH_DURATION_TOLERANCE_MILLISECONDS = 5_000;
+export const SEARCH_DURATION_TOLERANCE_SECONDS = 5;
+
+/**
+ * Divisor between MusicBrainz's wire unit and this codebase's.
+ *
+ * MusicBrainz reports `recording.length` in milliseconds; everything here
+ * speaks seconds, so the comparison converts rather than the caller.
+ */
+const MILLISECONDS_PER_SECOND = 1000;
 
 /**
  * The minimum search score worth considering at all.
@@ -208,12 +216,12 @@ export const MINIMUM_SEARCH_SCORE = 90;
  *
  * @param query.title - The recording's title.
  * @param query.artistName - The performing artist.
- * @param query.durationMs - Its length, which does the disambiguating.
+ * @param query.durationSeconds - Its length, which does the disambiguating.
  * @param fetcher - Injected for tests.
  * @returns The matching recording, or null when none is close enough.
  */
 export async function searchRecording(
-  query: { title: string; artistName: string; durationMs: number },
+  query: { title: string; artistName: string; durationSeconds: number },
   fetcher: typeof fetch = fetch,
 ): Promise<MusicBrainzRecording | null> {
   const lucene = `recording:"${escapeLucene(query.title)}" AND artist:"${escapeLucene(query.artistName)}"`;
@@ -225,7 +233,8 @@ export async function searchRecording(
     (recording) =>
       (recording.score ?? 0) >= MINIMUM_SEARCH_SCORE
       && recording.length != null
-      && Math.abs(recording.length - query.durationMs) <= SEARCH_DURATION_TOLERANCE_MILLISECONDS,
+      && Math.abs(recording.length / MILLISECONDS_PER_SECOND - query.durationSeconds)
+        <= SEARCH_DURATION_TOLERANCE_SECONDS,
   );
 
   return candidate === undefined ? null : findRecordingDetail(candidate.id, fetcher);

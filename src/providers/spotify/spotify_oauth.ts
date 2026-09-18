@@ -199,12 +199,12 @@ export async function refreshAccessToken(options: {
  *
  * @param tokens - The stored tokens.
  * @param options.now - Clock.
- * @param options.marginMs - How long before actual expiry to refresh early,
+ * @param options.marginMilliseconds - How long before actual expiry to refresh early,
  *   so a request in flight does not race the token's own expiry.
  */
 export function needsRefresh(
   tokens: SpotifyTokens,
-  options: { now: () => number; marginMs: number },
+  options: { now: () => number; marginMilliseconds: number },
 ): boolean {
-  return options.now() >= tokens.expiresAt - options.marginMs;
+  return options.now() >= tokens.expiresAt - options.marginMilliseconds;
 }

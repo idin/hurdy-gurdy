@@ -24,9 +24,11 @@ import {
 } from "./catalogue/find_best_versions";
 import { forgetLikedTracks } from "./cache/record_library_facts";
 import {
+  checkKindNeedsSpotifyToken,
   countPendingResolutions,
   enqueueResolutions,
   findNextResolution,
+  recordResolutionFailure,
   RESOLUTION_PRIORITY,
 } from "./resolver/resolution_queue";
 import { runResolutionTask } from "./resolver/resolve_artist_totals";
@@ -65,6 +67,15 @@ const LIBRARY_WRITE_ACTIONS = ["save", "remove"] as const;
  * same moment competes with it for the subrequest budget.
  */
 const RESOLVER_FIRST_TICK_SECONDS = 5;
+
+/**
+ * Durable Object storage key holding the user the resolver acts for.
+ *
+ * Needed because `this.props` exists only on a connection, and the resolver
+ * runs from an alarm. Storing the id is what lets background work continue
+ * after the user disconnects — which is the entire point of queueing it.
+ */
+const RESOLVER_USER_ID_KEY = "resolver_spotify_user_id";
 
 /**
  * How many liked songs `find_better_versions` examines by default.
@@ -193,10 +204,44 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
         // A connection must not fail over background bookkeeping.
       }
 
+      // Record who the resolver is working for, while a connection still
+      // makes that knowable. Without this the alarm has no user id at all.
+      try {
+        await this.findResolverUserId();
+      } catch {
+        // A connection must not fail over background bookkeeping.
+      }
+
       await this.schedule(RESOLVER_FIRST_TICK_SECONDS, "continueResolving", undefined, {
         idempotent: true,
       });
     }
+  }
+
+  /**
+   * The Spotify user the resolver works on behalf of.
+   *
+   * `this.props` is populated per connection, and an alarm is not a
+   * connection — so a resolver that read it directly saw undefined and looked
+   * up the empty user id, which matches no stored session. The id is written
+   * to the Durable Object's own storage whenever someone connects, and read
+   * back here.
+   *
+   * @returns The stored user id, or the connected one when a session is
+   *   active. Empty when nobody has ever connected, which is honest: there is
+   *   no user to act for, and the caller's token fetch will say so.
+   */
+  async findResolverUserId(): Promise<string> {
+    const connected = this.props?.spotifyUserId;
+    if (connected !== undefined && connected !== "") {
+      // Refreshed on every connection rather than written once, so revoking
+      // and reconnecting as a different user does not leave the resolver
+      // working for the old one.
+      await this.ctx.storage.put(RESOLVER_USER_ID_KEY, connected);
+      return connected;
+    }
+
+    return (await this.ctx.storage.get<string>(RESOLVER_USER_ID_KEY)) ?? "";
   }
 
   /**
@@ -218,33 +263,64 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
 
     let rateLimited = false;
     let usesMusicBrainz = false;
+    // Held outside the try so a failure before `runResolutionTask` — a token
+    // fetch, say — can still be recorded against the task that caused it.
+    // Without that, a task failing on this path is retried forever with
+    // `attempts` stuck at zero, so a jammed queue looks pristine. That is
+    // exactly how 1,979 tasks went unattempted for four days unnoticed.
+    let currentTask: Awaited<ReturnType<typeof findNextResolution>> = null;
     try {
       const task = await findNextResolution(database);
+      currentTask = task;
       if (task !== null) {
         usesMusicBrainz = task.kind === "resolve-musicbrainz";
-        const accessToken = await getAccessToken(
-          this.env.SPOTIFY_TOKENS,
-          this.props?.spotifyUserId ?? "",
-          { clientId: this.env.SPOTIFY_CLIENT_ID, now: () => Date.now() },
-        );
+
+        // The token is fetched only when the task actually reaches Spotify.
+        // Fetching it unconditionally is what stalled the resolver: an alarm
+        // has no connection and therefore no `this.props`, so every task —
+        // including MusicBrainz resolution, which never calls Spotify — died
+        // on a session lookup for the empty user id.
+        let accessToken: string | null = null;
+        if (checkKindNeedsSpotifyToken(task.kind)) {
+          accessToken = await getAccessToken(
+            this.env.SPOTIFY_TOKENS,
+            await this.findResolverUserId(),
+            { clientId: this.env.SPOTIFY_CLIENT_ID, now: () => Date.now() },
+          );
+        }
+
         // The provider, not the raw client: a backfill page must go through
         // the decorator's recording path, or the facts it exists to write
         // would not be written.
-        const provider = new CachedMediaProvider(
-          new SpotifyProvider(accessToken),
-          database,
-        );
+        const provider =
+          accessToken === null
+            ? undefined
+            : new CachedMediaProvider(new SpotifyProvider(accessToken), database);
+
         await runResolutionTask(
           database,
-          new SpotifyApiClient(accessToken),
+          new SpotifyApiClient(accessToken ?? ""),
           task,
           provider,
+          this.env.LISTENBRAINZ_USER_TOKEN,
         );
       }
     } catch (error) {
       // A rate-limited resolver is making no progress, and ticking again
       // immediately spends the quota it is waiting on.
       rateLimited = isSpotifyRateLimited(error);
+
+      // A rate limit is transient and must not count against the task — the
+      // work was never attempted, the quota simply ran out. Anything else is
+      // a real failure and is recorded, so three of them retire the task
+      // instead of it retrying silently forever.
+      if (!rateLimited && currentTask !== null) {
+        try {
+          await recordResolutionFailure(database, currentTask);
+        } catch {
+          // Bookkeeping about a failure must not itself become one.
+        }
+      }
     }
 
     let pending = 0;
@@ -290,12 +366,12 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
       },
       async ({ query, types, limit, cursor }) => {
         const provider = await this.provider();
-        const result = await provider.search(query, { types, limit, cursor });
+        const searchResponse = await provider.search(query, { types, limit, cursor });
         return {
           content: [
             {
               type: "text" as const,
-              text: JSON.stringify(result, null, 2),
+              text: JSON.stringify(searchResponse, null, 2),
             },
           ],
         };

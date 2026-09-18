@@ -23,11 +23,10 @@
  * lowered, `COALESCE` for values that must never be overwritten with null.
  */
 
-import type {
-  ExportedLibrary,
-  ExportedPlaylist,
-  PlaySummary,
-} from "./read_spotify_export";
+import type { ExportedLibrary, ExportedPlaylist } from "./read_spotify_export";
+import type { ExtendedPlay } from "./read_extended_history";
+import type { SkipThreshold } from "../metrics/cluster_skip_threshold";
+import { checkPlayWasSkipped } from "../metrics/play_metrics";
 
 /**
  * How many statements go in one D1 batch.
@@ -36,6 +35,13 @@ import type {
  * failure there loses the whole import rather than one chunk of it.
  */
 const STATEMENTS_PER_BATCH = 50;
+
+/**
+ * Divisor between the export's unit and the cache's.
+ *
+ * The streaming history reports `ms_played`; every duration stored is seconds.
+ */
+const MILLISECONDS_PER_SECOND = 1000;
 
 /** What an import wrote, for reporting back. */
 export type ImportSummary = {
@@ -80,7 +86,7 @@ export async function importLibrary(
     statements.push(
       database
         .prepare(
-          `INSERT INTO track (uri, id, name, duration_ms, is_liked, cached_at)
+          `INSERT INTO track (uri, id, name, duration_seconds, is_liked, cached_at)
              VALUES (?, ?, ?, NULL, 1, ?)
            ON CONFLICT(uri) DO UPDATE SET
              name = excluded.name,
@@ -175,7 +181,7 @@ export async function importPlaylists(
       statements.push(
         database
           .prepare(
-            `INSERT INTO track (uri, id, name, duration_ms, is_liked, cached_at)
+            `INSERT INTO track (uri, id, name, duration_seconds, is_liked, cached_at)
                VALUES (?, ?, ?, NULL, 0, ?)
              ON CONFLICT(uri) DO UPDATE SET name = excluded.name`,
           )
@@ -199,54 +205,88 @@ export async function importPlaylists(
 }
 
 /**
- * Write play counts and skips.
+ * Write individual plays, with their skip judgement.
  *
- * Written **once per song**, into `song_plays`, rather than onto every track
- * row whose name matches. The first version did the latter and gave three
- * copies of "Eye In The Sky" 21 plays each — 450 duplicated names among
- * 2,955 counted rows. A play belongs to the recording, not to a pressing of
- * it, and the `track_plays` view joins it back out.
+ * **One row per play**, not per song. The aggregates every metric needs —
+ * completion ratios, play time, skip and deliberate ratios — are computed by
+ * the `track_plays` view from these rows, so the counts that used to be stored
+ * are derived instead. Storing a `play_count` meant `ms_played` was thrown
+ * away, and with it every metric built since.
  *
- * The join is still by name, because the history carries no URIs. A name
- * that matches nothing keeps its row in `song_plays` and simply joins to no
- * track — the count is retained rather than lost, and becomes visible if the
- * track is read later.
+ * Plays whose track has no URI are dropped: the extended history carries one
+ * on 58,327 of 58,521 plays, and the 194 without are podcasts and audiobooks
+ * that are not tracks at all.
+ *
+ * `skipped` is computed here rather than in the view because it depends on
+ * thresholds clustered from the whole import — a per-row expression cannot see
+ * the distribution it belongs to. Recomputed and rewritten on every import,
+ * never patched in place.
  *
  * @param database - Where the cache lives.
- * @param summaries - From `summarisePlays`.
- * @returns How many tracks were matched and updated.
+ * @param plays - Every play from the extended history.
+ * @param threshold - From `clusterSkipThreshold` over this import's skips.
+ * @param durationsByUri - Track lengths, needed to judge a skip. Plays whose
+ *   track has no known duration are stored with `skipped = 0`, since no honest
+ *   judgement is possible without one.
+ * @param now - Epoch milliseconds.
+ * @returns How many plays were written.
  */
-export async function importPlayCounts(
+export async function importPlays(
   database: D1Database,
-  summaries: Map<string, PlaySummary>,
+  plays: ExtendedPlay[],
+  threshold: SkipThreshold | null,
+  durationsByUri: Map<string, number>,
+  now: number,
 ): Promise<number> {
   const statements: D1PreparedStatement[] = [];
 
-  for (const [playKey, summary] of summaries) {
+  for (const play of plays) {
+    const trackUri = play.spotify_track_uri;
+    if (trackUri === null) {
+      continue;
+    }
+
+    const durationSeconds = durationsByUri.get(trackUri);
+    // The export's own unit is milliseconds; everything stored is seconds.
+    const secondsPlayed = play.ms_played / MILLISECONDS_PER_SECOND;
+    const isSkipped =
+      threshold !== null
+      && durationSeconds !== undefined
+      && checkPlayWasSkipped(
+        { secondsPlayed, durationSeconds, reasonEnd: play.reason_end },
+        threshold,
+      );
+
     statements.push(
       database
         .prepare(
-          `INSERT INTO song_plays
-             (play_key, artist_name, track_name, play_count, skip_count, last_played, imported_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(play_key) DO UPDATE SET
-             play_count = excluded.play_count,
-             skip_count = excluded.skip_count,
-             last_played = excluded.last_played,
+          `INSERT INTO play
+             (track_uri, played_at, seconds_played, reason_start, reason_end,
+              shuffle, skipped, imported_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(track_uri, played_at) DO UPDATE SET
+             seconds_played = excluded.seconds_played,
+             reason_start = excluded.reason_start,
+             reason_end = excluded.reason_end,
+             shuffle = excluded.shuffle,
+             -- Rewritten, not preserved: the threshold moves as the library
+             -- grows, so an older verdict must not survive a re-import.
+             skipped = excluded.skipped,
              imported_at = excluded.imported_at`,
         )
         .bind(
-          playKey,
-          summary.artistName,
-          summary.trackName,
-          summary.playCount,
-          summary.skipCount,
-          summary.lastPlayed,
-          Date.now(),
+          trackUri,
+          play.ts,
+          secondsPlayed,
+          play.reason_start,
+          play.reason_end,
+          play.shuffle === null ? null : Number(play.shuffle),
+          isSkipped ? 1 : 0,
+          now,
         ),
     );
   }
 
   await runInBatches(database, statements);
-  return summaries.size;
+  return statements.length;
 }

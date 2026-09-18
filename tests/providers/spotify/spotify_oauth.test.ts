@@ -88,19 +88,19 @@ describe("needsRefresh", () => {
 
   test("false well before expiry", () => {
     expect(
-      needsRefresh(tokens, { now: () => 0, marginMs: 60_000 }),
+      needsRefresh(tokens, { now: () => 0, marginMilliseconds: 60_000 }),
     ).toBe(false);
   });
 
   test("true once inside the refresh margin", () => {
     expect(
-      needsRefresh(tokens, { now: () => 999_500, marginMs: 60_000 }),
+      needsRefresh(tokens, { now: () => 999_500, marginMilliseconds: 60_000 }),
     ).toBe(true);
   });
 
   test("true once already past expiry", () => {
     expect(
-      needsRefresh(tokens, { now: () => 1_000_001, marginMs: 60_000 }),
+      needsRefresh(tokens, { now: () => 1_000_001, marginMilliseconds: 60_000 }),
     ).toBe(true);
   });
 });

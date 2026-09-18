@@ -423,11 +423,11 @@ export class CachedMediaProvider implements MediaProvider {
    * refetching.
    */
   private async invalidate(method: string): Promise<void> {
-    const base = `${this.name}:${method}`;
+    const keyPrefix = `${this.name}:${method}`;
     try {
       await this.database
         .prepare(`DELETE FROM cached_response WHERE key = ? OR key LIKE ?`)
-        .bind(base, `${base}:%`)
+        .bind(keyPrefix, `${keyPrefix}:%`)
         // Both forms are needed. `buildCacheKey` appends parameters after a
         // colon, but a call with no parameters produces no trailing colon at
         // all — `spotify:getLikedTracks`, not `spotify:getLikedTracks:`. A

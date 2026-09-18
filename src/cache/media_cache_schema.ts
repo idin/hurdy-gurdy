@@ -19,6 +19,8 @@
  * for the initial shape.
  */
 
+import { DEFAULT_LENGTH_WEIGHT_EXPONENT } from "../metrics/duration_weighted_completion";
+
 /**
  * Every statement needed to bring an empty database up to the current shape.
  *
@@ -56,7 +58,9 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
      id           TEXT NOT NULL,
      name         TEXT NOT NULL,
      album_uri    TEXT,
-     duration_ms  INTEGER,
+     -- REAL, because the completion ratios divide by it. Spotify reports
+     -- milliseconds; the provider converts once on the way in.
+     duration_seconds  REAL,
      is_liked     INTEGER NOT NULL DEFAULT 0,
      -- When the like happened, as the provider reported it. Null for tracks
      -- seen in a playlist or a search rather than in the liked library.
@@ -197,32 +201,44 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
   `CREATE INDEX IF NOT EXISTS pinned_track_song ON pinned_track (song_key)`,
 
   /*
-   * Play counts, keyed by the recording rather than by a pressing of it.
+   * One row per play, as the extended streaming history records it.
    *
-   * The bug this fixes: the streaming history identifies tracks by name
-   * alone — no URIs — so writing a count onto every row whose name matched
-   * gave three copies of "Eye In The Sky" 21 plays each. 450 of 2,955
-   * counted rows were duplicated that way on 2026-09-13.
+   * **Replaces the earlier `song_plays`, which stored counts.** Counts are
+   * derivable from plays and plays are not derivable from counts, so storing
+   * the aggregate was storing the wrong thing — every metric built since
+   * needs `ms_played` per play, and none of them could be computed from a
+   * `play_count` column.
    *
-   * A play belongs to the song. Storing it here once, and joining back to
-   * whichever pressings share that name, means the number is right however
-   * many copies of the record are in the library.
+   * Keyed on the URI rather than the track name, which the older account
+   * export forced. The extended history carries `spotify_track_uri` on 58,327
+   * of 58,521 plays, so the name-matching that once gave three copies of "Eye
+   * In The Sky" 21 plays each is no longer needed.
    *
-   * Keyed on the lowercased name because that is what the history gives.
-   * When `song_key` is populated from API durations this becomes keyable on
-   * the stronger identity, and the join below changes with it.
+   * `played_at` completes the key. Two plays of one track at the same second
+   * do not happen; the same track on different days must not collide.
+   *
+   * `skipped` is the one derived column stored here rather than computed in a
+   * view, and deliberately so: it depends on thresholds clustered from the
+   * whole library at import time, which a per-row view cannot see. It is
+   * rewritten wholesale on each import, never patched.
    */
-  `CREATE TABLE IF NOT EXISTS song_plays (
-     play_key     TEXT PRIMARY KEY,
-     artist_name  TEXT NOT NULL,
-     track_name   TEXT NOT NULL,
-     play_count   INTEGER NOT NULL DEFAULT 0,
-     skip_count   INTEGER NOT NULL DEFAULT 0,
-     last_played  TEXT,
-     imported_at  INTEGER NOT NULL
+  `CREATE TABLE IF NOT EXISTS play (
+     track_uri         TEXT NOT NULL,
+     played_at         TEXT NOT NULL,
+     -- REAL, not INTEGER: the completion ratios divide by a duration, and
+     -- rounding a play to whole seconds would put error into every one of
+     -- them. The export reports milliseconds; the conversion happens on write.
+     seconds_played    REAL NOT NULL,
+     reason_start      TEXT,
+     reason_end        TEXT,
+     shuffle           INTEGER,
+     skipped           INTEGER NOT NULL DEFAULT 0,
+     imported_at       INTEGER NOT NULL,
+     PRIMARY KEY (track_uri, played_at)
    )`,
 
-  `CREATE INDEX IF NOT EXISTS song_plays_track_name ON song_plays (track_name)`,
+  `CREATE INDEX IF NOT EXISTS play_track_uri ON play (track_uri)`,
+  `CREATE INDEX IF NOT EXISTS play_played_at ON play (played_at)`,
 
   /*
    * Per-user monthly budget on uncached work.
@@ -374,23 +390,72 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
             )`,
 
   /*
-   * Play counts per track, read from the song-level table.
+   * Every listening metric for a track, derived from its plays.
    *
-   * A LEFT JOIN on name, so every pressing of a song reports the same count —
-   * which is correct, because it is the same song and the same listening.
-   * What it does NOT do is multiply the total: summing this view over
-   * distinct songs gives the real figure, where summing a per-row column did
-   * not.
+   * A view rather than columns, because all of it is computable from `play`
+   * and `track.duration_seconds` — the store-the-fact rule. Recomputing on read
+   * costs a scan of one indexed table and means a corrected duration or a
+   * re-clustered threshold is reflected everywhere at once, with no column to
+   * migrate and nothing to go stale.
+   *
+   * The metrics, and what each answers:
+   *
+   * | Column | Question |
+   * | --- | --- |
+   * | `mean_completion_ratio` | when it plays, how much of it do you hear? |
+   * | `mean_squared_completion_ratio` | same, counting whole plays far above halves |
+   * | `duration_weighted_completion` | same again, tilted toward longer songs |
+   * | `total_play_time` | how many seconds of your life has it had? |
+   * | `skip_ratio` | how often do you reject it? |
+   * | `deliberate_play_ratio` | do you seek it out, or does it just arrive? |
+   *
+   * `mean_squared_completion_ratio` is the one worth explaining. Squaring
+   * before averaging is what makes two half-plays (0.25 each) score below one
+   * whole play (1.0) despite identical listening time — Idin's point, and the
+   * reason a plain mean is kept alongside rather than replaced.
+   *
+   * `total_play_time` sums what was actually heard, in seconds. It is
+   * explicitly NOT `play_count * duration`: a two-second skip contributes two
+   * seconds, not a full track. Each play is capped at the track's length for
+   * the same reason the ratio is — a row logging 300 seconds against a
+   * 100-second song would otherwise report listening that did not happen.
    */
   `CREATE VIEW IF NOT EXISTS track_plays AS
      SELECT
-       track.uri                              AS track_uri,
-       COALESCE(song_plays.play_count, 0)     AS play_count,
-       COALESCE(song_plays.skip_count, 0)     AS skip_count,
-       song_plays.last_played                 AS last_played
+       track.uri                                            AS track_uri,
+       COUNT(play.track_uri)                                AS play_count,
+       SUM(play.skipped)                                    AS skip_count,
+       MAX(play.played_at)                                  AS last_played,
+       SUM(MIN(play.seconds_played, track.duration_seconds)) AS total_play_time,
+       AVG(MIN(play.seconds_played / track.duration_seconds, 1.0))
+                                                            AS mean_completion_ratio,
+       AVG(MIN(play.seconds_played / track.duration_seconds, 1.0)
+           * MIN(play.seconds_played / track.duration_seconds, 1.0))
+                                                            AS mean_squared_completion_ratio,
+       -- EXP(exponent * LN(x)) rather than POWER(x, exponent): D1 blocks
+       -- POWER outright ("not authorized to use function"), and writing it as
+       -- SQRT would hard-code the 0.5 and lose the tunable exponent that is
+       -- the whole point of this metric.
+       --
+       -- The median is a subquery rather than a stored number because it
+       -- drifts as the library grows — store the fact, derive the rest.
+       AVG(MIN(play.seconds_played / track.duration_seconds, 1.0)
+           * MIN(play.seconds_played / track.duration_seconds, 1.0))
+         * EXP(${DEFAULT_LENGTH_WEIGHT_EXPONENT} * LN(track.duration_seconds / (
+             SELECT AVG(duration_seconds) FROM (
+               SELECT duration_seconds FROM track WHERE duration_seconds > 0
+               ORDER BY duration_seconds
+               LIMIT 2 - (SELECT COUNT(*) FROM track WHERE duration_seconds > 0) % 2
+               OFFSET (SELECT (COUNT(*) - 1) / 2 FROM track WHERE duration_seconds > 0)))))
+                                                            AS duration_weighted_completion,
+       SUM(play.skipped) * 1.0 / COUNT(play.track_uri)      AS skip_ratio,
+       SUM(CASE WHEN play.reason_start IN ('clickrow', 'playbtn', 'remote')
+                THEN 1 ELSE 0 END) * 1.0 / COUNT(play.track_uri)
+                                                            AS deliberate_play_ratio
      FROM track
-     LEFT JOIN song_plays
-            ON LOWER(song_plays.track_name) = LOWER(track.name)`,
+     JOIN play ON play.track_uri = track.uri
+     WHERE track.duration_seconds IS NOT NULL AND track.duration_seconds > 0
+     GROUP BY track.uri`,
 
   /*
    * Which playlists hold each track, as a comma-joined list of URIs.

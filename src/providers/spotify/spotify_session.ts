@@ -15,7 +15,7 @@
 
 import { refreshAccessToken, type SpotifyTokens } from "./spotify_oauth";
 
-const REFRESH_MARGIN_MS = 60_000;
+const REFRESH_MARGIN_MILLISECONDS = 60_000;
 
 /** What is actually persisted in KV, and its own record of freshness. */
 type StoredSession = {
@@ -81,7 +81,7 @@ export async function getAccessToken(
   }
   const stored = JSON.parse(raw) as StoredSession;
 
-  if (options.now() < stored.expiresAt - REFRESH_MARGIN_MS) {
+  if (options.now() < stored.expiresAt - REFRESH_MARGIN_MILLISECONDS) {
     return stored.accessToken;
   }
 

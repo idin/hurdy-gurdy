@@ -40,7 +40,7 @@ function track(
     albumName: "Meddle",
     albumUri: "spotify:album:meddle",
     albumTrackCount: null,
-    durationMs: 1,
+    durationSeconds: 1,
     isrc: null,
   };
 }

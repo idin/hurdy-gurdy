@@ -153,7 +153,7 @@ describe("searchRecording", () => {
     });
 
     const found = await searchRecording(
-      { title: "Ace of Spades", artistName: "Motörhead", durationMs: 168_000 },
+      { title: "Ace of Spades", artistName: "Motörhead", durationSeconds: 168 },
       fetcher,
     );
 
@@ -167,7 +167,7 @@ describe("searchRecording", () => {
     const { fetcher } = fakeSearch(ACE_OF_SPADES);
 
     const found = await searchRecording(
-      { title: "Ace of Spades", artistName: "Motörhead", durationMs: 240_000 },
+      { title: "Ace of Spades", artistName: "Motörhead", durationSeconds: 240 },
       fetcher,
     );
 
@@ -182,7 +182,7 @@ describe("searchRecording", () => {
     });
 
     const found = await searchRecording(
-      { title: "Ace of Spades", artistName: "Motörhead", durationMs: 168_000 },
+      { title: "Ace of Spades", artistName: "Motörhead", durationSeconds: 168 },
       fetcher,
     );
 
@@ -197,7 +197,7 @@ describe("searchRecording", () => {
     });
 
     const found = await searchRecording(
-      { title: "Ace of Spades", artistName: "Motörhead", durationMs: 168_000 },
+      { title: "Ace of Spades", artistName: "Motörhead", durationSeconds: 168 },
       fetcher,
     );
 
@@ -211,7 +211,7 @@ describe("searchRecording", () => {
     );
 
     const found = await searchRecording(
-      { title: "Ace of Spades", artistName: "Motörhead", durationMs: 170_000 },
+      { title: "Ace of Spades", artistName: "Motörhead", durationSeconds: 170 },
       fetcher,
     );
 
@@ -224,7 +224,7 @@ describe("searchRecording", () => {
     const { fetcher, requests } = fakeSearch({ recordings: [] });
 
     await searchRecording(
-      { title: 'Christmas Eve / Sarajevo 12/24 (Instrumental)', artistName: "A:B", durationMs: 1 },
+      { title: 'Christmas Eve / Sarajevo 12/24 (Instrumental)', artistName: "A:B", durationSeconds: 1 },
       fetcher,
     );
 

@@ -49,6 +49,15 @@ const UNCOUNTED_COVERAGE = {
 /** Membership for something not yet resolved against the library. */
 const UNRESOLVED_MEMBERSHIP = { inLibrary: false } as const;
 
+/**
+ * Divisor turning Spotify's milliseconds into this codebase's seconds.
+ *
+ * Spotify is the only source that reports durations in milliseconds, and this
+ * file is the only place the conversion happens — so a reader looking for
+ * where the unit changes finds exactly one answer.
+ */
+const MILLISECONDS_PER_SECOND = 1000;
+
 function toTrack(track: SpotifyTrack): Track {
   const artists = (track.artists ?? []).map((artist) => ({
     uri: `spotify:artist:${artist.id}`,
@@ -64,7 +73,9 @@ function toTrack(track: SpotifyTrack): Track {
     albumUri: track.album?.id === undefined ? null : `spotify:album:${track.album.id}`,
     // Free on a full track object, and the denominator for album coverage.
     albumTrackCount: track.album?.total_tracks ?? null,
-    durationMs: track.duration_ms,
+    // The one place milliseconds become seconds. Spotify is the only source
+    // that sends them; everything downstream of this mapper is seconds.
+    durationSeconds: track.duration_ms / MILLISECONDS_PER_SECOND,
     // The hop from a Spotify id to a MusicBrainz recording. Discarded until
     // now because the type did not ask for it, not because Spotify withheld
     // it — the same shape as the artist ids this mapper used to drop.
@@ -337,7 +348,8 @@ export class SpotifyProvider implements MediaProvider {
     return {
       isPlaying: state.is_playing,
       track: state.item === null ? null : toTrack(state.item),
-      progressMs: state.progress_ms,
+      progressSeconds:
+        state.progress_ms === null ? null : state.progress_ms / MILLISECONDS_PER_SECOND,
       deviceName: state.device?.name ?? null,
     };
   }

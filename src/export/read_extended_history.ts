@@ -22,8 +22,10 @@
 /**
  * One play, as the extended history records it.
  *
- * Named exactly as the file names them — `ms_played`, not `msPlayed` — so a
- * reader comparing this type against the JSON does not have to translate.
+ * Named exactly as the file names them — `ms_played`, not `secondsPlayed` — so
+ * a reader comparing this type against the JSON does not have to translate.
+ * This is the one place milliseconds survive: the file's own shape. Everything
+ * built from it is converted to seconds at the point of use.
  */
 export type ExtendedPlay = {
   /** ISO-8601 with seconds, e.g. `2026-01-01T00:33:40Z`. */
@@ -71,6 +73,13 @@ export type ExtendedPlay = {
 const DELIBERATE_END_REASONS: ReadonlySet<string> = new Set(["fwdbtn", "endplay"]);
 
 /**
+ * Divisor between the export file's unit and this codebase's.
+ *
+ * The file reports `ms_played`; everything derived from it is seconds.
+ */
+const MILLISECONDS_PER_SECOND = 1000;
+
+/**
  * Parse one `Streaming_History_Audio_<year>.json`.
  *
  * @param raw - The file's contents.
@@ -106,7 +115,7 @@ export type ExtendedPlaySummary = {
   skippedCount: number;
   /** Plays that ended some other way — a logout, a crash, a device change. */
   otherCount: number;
-  totalMsPlayed: number;
+  totalSecondsPlayed: number;
   /** ISO timestamp of the most recent play. */
   lastPlayed: string;
   /** How many of these plays happened with shuffle on. */
@@ -142,7 +151,7 @@ export function summariseExtendedPlays(
       completedCount: 0,
       skippedCount: 0,
       otherCount: 0,
-      totalMsPlayed: 0,
+      totalSecondsPlayed: 0,
       lastPlayed: play.ts,
       shuffledCount: 0,
     };
@@ -155,7 +164,7 @@ export function summariseExtendedPlays(
       existing.otherCount += 1;
     }
 
-    existing.totalMsPlayed += play.ms_played;
+    existing.totalSecondsPlayed += play.ms_played / MILLISECONDS_PER_SECOND;
     existing.shuffledCount += play.shuffle === true ? 1 : 0;
     if (play.ts > existing.lastPlayed) {
       existing.lastPlayed = play.ts;

@@ -82,18 +82,18 @@ export async function recordTracks(
     statements.push(
       database
         .prepare(
-          `INSERT INTO track (uri, id, name, album_uri, duration_ms, is_liked, song_key, isrc, cached_at)
+          `INSERT INTO track (uri, id, name, album_uri, duration_seconds, is_liked, song_key, isrc, cached_at)
              VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)
            ON CONFLICT(uri) DO UPDATE SET
              name = excluded.name,
-             duration_ms = excluded.duration_ms,
+             duration_seconds = excluded.duration_seconds,
              -- MAX, not excluded: a track met again in a playlist must not
              -- erase the fact that it is liked.
              is_liked = MAX(track.is_liked, excluded.is_liked),
              -- COALESCE, not excluded: an export row has no duration, so its
              -- song key is meaningless and must not overwrite a real one
              -- built from an API read.
-             duration_ms = COALESCE(excluded.duration_ms, track.duration_ms),
+             duration_seconds = COALESCE(excluded.duration_seconds, track.duration_seconds),
              song_key = COALESCE(excluded.song_key, track.song_key),
              isrc = COALESCE(excluded.isrc, track.isrc),
              cached_at = excluded.cached_at`,
@@ -102,14 +102,14 @@ export async function recordTracks(
           track.uri,
           track.id,
           track.name,
-          track.durationMs,
+          track.durationSeconds,
           liked,
           // No duration means no meaningful key — a title-only key would merge
           // the two Detroit Rock City versions Idin said must stay apart.
-          track.isrc !== null || track.durationMs > 0
+          track.isrc !== null || track.durationSeconds > 0
             ? buildSongKey({
                 title: track.name,
-                durationMs: track.durationMs,
+                durationSeconds: track.durationSeconds,
                 isrc: track.isrc,
                 artistUris: track.artists.map((artist) => artist.uri),
               })

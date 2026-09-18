@@ -4,7 +4,7 @@
  * The export is what a data-portability request returns, and it answers
  * questions the Web API cannot. 2,263 liked tracks arrive in one file rather
  * than 46 paged calls whose combined output exceeds an agent's context; a
- * year of play events arrives with per-play `msPlayed`, which no endpoint
+ * year of play events arrives with per-play `secondsPlayed`, which no endpoint
  * supplies at any price.
  *
  * **Every shape here was read off Idin's own export on 2026-09-13**, not
@@ -85,6 +85,12 @@ export type ExportedPlay = {
   endTime: string;
   artistName: string;
   trackName: string;
+  /**
+   * Named as the file names it, because `readExportedPlays` casts the parsed
+   * JSON straight to this type — a renamed field here would read as undefined
+   * with no error. The one place milliseconds survive; everything derived
+   * from it is seconds.
+   */
   msPlayed: number;
 };
 
@@ -96,7 +102,14 @@ export type ExportedPlay = {
  * it — which is the closest thing to a negative signal this project can get,
  * since a lazy catalogue has no true negatives.
  */
-export const SKIP_THRESHOLD_MILLISECONDS = 30_000;
+export const SKIP_THRESHOLD_SECONDS = 30;
+
+/**
+ * Divisor between the export file's unit and this codebase's.
+ *
+ * The file reports `msPlayed`; everything derived from it is seconds.
+ */
+const MILLISECONDS_PER_SECOND = 1000;
 
 /**
  * What the plays say about one track.
@@ -110,7 +123,7 @@ export type PlaySummary = {
   playCount: number;
   /** Plays abandoned before it. */
   skipCount: number;
-  totalMsPlayed: number;
+  totalSecondsPlayed: number;
   /** `YYYY-MM-DD HH:MM` of the most recent play. */
   lastPlayed: string;
 };
@@ -200,7 +213,8 @@ export function summarisePlays(plays: ExportedPlay[]): Map<string, PlaySummary> 
   for (const play of plays) {
     const key = buildPlayKey(play.artistName, play.trackName);
     const existing = summaries.get(key);
-    const isSkip = play.msPlayed < SKIP_THRESHOLD_MILLISECONDS;
+    const secondsPlayed = play.msPlayed / MILLISECONDS_PER_SECOND;
+    const isSkip = secondsPlayed < SKIP_THRESHOLD_SECONDS;
 
     if (existing === undefined) {
       summaries.set(key, {
@@ -208,7 +222,7 @@ export function summarisePlays(plays: ExportedPlay[]): Map<string, PlaySummary> 
         trackName: play.trackName,
         playCount: isSkip ? 0 : 1,
         skipCount: isSkip ? 1 : 0,
-        totalMsPlayed: play.msPlayed,
+        totalSecondsPlayed: secondsPlayed,
         lastPlayed: play.endTime,
       });
       continue;
@@ -216,7 +230,7 @@ export function summarisePlays(plays: ExportedPlay[]): Map<string, PlaySummary> 
 
     existing.playCount += isSkip ? 0 : 1;
     existing.skipCount += isSkip ? 1 : 0;
-    existing.totalMsPlayed += play.msPlayed;
+    existing.totalSecondsPlayed += secondsPlayed;
     if (play.endTime > existing.lastPlayed) {
       existing.lastPlayed = play.endTime;
     }

@@ -5,7 +5,7 @@ import {
   readExportedLibrary,
   readExportedPlaylists,
   readExportedPlays,
-  SKIP_THRESHOLD_MILLISECONDS,
+  SKIP_THRESHOLD_SECONDS,
   summarisePlays,
 } from "../../src/export/read_spotify_export";
 
@@ -112,7 +112,7 @@ describe("summarisePlays", () => {
     // The negative signal. Summing plays and skips together would make a
     // heavily-skipped track look popular.
     const summaries = summarisePlays([
-      play("Detroit Rock City", SKIP_THRESHOLD_MILLISECONDS - 1, "2026-01-01 10:00"),
+      play("Detroit Rock City", SKIP_THRESHOLD_SECONDS * 1000 - 1, "2026-01-01 10:00"),
     ]);
 
     const summary = summaries.get(buildPlayKey("KISS", "Detroit Rock City"));
@@ -122,7 +122,7 @@ describe("summarisePlays", () => {
 
   test("a play exactly at the threshold counts as a play", () => {
     const summaries = summarisePlays([
-      play("Detroit Rock City", SKIP_THRESHOLD_MILLISECONDS, "2026-01-01 10:00"),
+      play("Detroit Rock City", SKIP_THRESHOLD_SECONDS * 1000, "2026-01-01 10:00"),
     ]);
 
     expect(summaries.get(buildPlayKey("KISS", "Detroit Rock City"))?.playCount).toBe(1);

@@ -47,6 +47,38 @@ export type ResolutionKind =
   | "resolve-musicbrainz";
 
 /**
+ * Kinds that reach Spotify and therefore need an access token.
+ *
+ * Stated as data rather than left implicit in the order of calls, because
+ * leaving it implicit is what broke the resolver. `continueResolving` fetched
+ * a token before examining the task, and since an alarm has no connection —
+ * and so no `this.props` — the lookup threw for every task, including the
+ * ones that never wanted Spotify.
+ *
+ * 1,979 `resolve-musicbrainz` tasks sat queued for four days with
+ * `attempts = 0` as a result. `resolve-musicbrainz` reads names out of the
+ * cache and calls ListenBrainz; it has no business failing on Spotify
+ * authentication.
+ */
+const SPOTIFY_BACKED_KINDS: ReadonlySet<ResolutionKind> = new Set([
+  "artist-album-count",
+  "artist-track-count",
+  "backfill-liked-tracks",
+]);
+
+/**
+ * Whether running this task requires a Spotify access token.
+ *
+ * @param kind - The task's kind.
+ * @returns True when the work reaches Spotify and a token must be fetched
+ *   first. False for work that runs entirely against the cache and other
+ *   services, which must stay runnable from an alarm with no session.
+ */
+export function checkKindNeedsSpotifyToken(kind: ResolutionKind): boolean {
+  return SPOTIFY_BACKED_KINDS.has(kind);
+}
+
+/**
  * How urgent a piece of work is. Lower drains first.
  *
  * The tiers exist because the queue will usually be long — a first library

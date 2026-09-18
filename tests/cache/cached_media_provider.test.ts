@@ -31,7 +31,7 @@ function trackPage(name: string): Page<Track> {
         albumName: "Meddle",
         albumUri: "spotify:album:meddle",
         albumTrackCount: null,
-        durationMs: 1,
+        durationSeconds: 1,
         isrc: null,
       },
     ],
@@ -204,7 +204,7 @@ describe("coverage from the cache", () => {
       .bind(NOW)
       .run();
     await database
-      .prepare(`INSERT INTO track (uri, id, name, album_uri, duration_ms, is_liked, liked_at, cached_at) VALUES ('spotify:track:t1','t1','Echoes','spotify:album:meddle',1,1,NULL,?)`)
+      .prepare(`INSERT INTO track (uri, id, name, album_uri, duration_seconds, is_liked, liked_at, cached_at) VALUES ('spotify:track:t1','t1','Echoes','spotify:album:meddle',1,1,NULL,?)`)
       .bind(NOW)
       .run();
     await database
