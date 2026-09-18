@@ -326,6 +326,12 @@ thin — but if either works it reduces how much has to be analysed locally.
    | --- | --- |
    | First 12 | 11/12 (92%) |
    | All 38 MBIDs in the catalogue | **23/38 (61%)** |
+   | 40 freshly-resolved MBIDs (2026-09-18) | **28/40 (70%)** |
+
+   The third row is the one to plan on. It was measured on MBIDs the
+   ListenBrainz pass produced after the resolver was fixed — an independent
+   set from the 38, and therefore the first coverage figure here not drawn
+   from whatever handful happened to already exist.
 
    **The second row is not a sample — it is the whole population.** The
    catalogue holds recording MBIDs for **38 of 4,624 tracks**, so the

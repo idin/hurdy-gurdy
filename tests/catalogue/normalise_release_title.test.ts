@@ -5,6 +5,7 @@ import {
   buildWorkKey,
   isLiveRelease,
   normaliseReleaseTitle,
+  stripMasterSuffixes,
 } from "../../src/catalogue/normalise_release_title";
 
 /**
@@ -289,5 +290,40 @@ describe("song identity", () => {
         artistUris: ["spotify:artist:kiss"],
       }),
     );
+  });
+});
+
+/**
+ * `stripMasterSuffixes` exists for catalogue lookups, which need the title's
+ * own words. `normaliseReleaseTitle` exists for grouping pressings, which
+ * needs a comparison key. The difference is the point, so it is asserted.
+ */
+describe("stripMasterSuffixes", () => {
+  test("removes a dashed remaster marker", () => {
+    // Measured 2026-09-18: ListenBrainz misses the raw form and hits this one.
+    expect(stripMasterSuffixes("Helter Skelter - Remastered 2009")).toBe("Helter Skelter");
+    expect(stripMasterSuffixes("Go Your Own Way - 2004 Remaster")).toBe("Go Your Own Way");
+  });
+
+  test("keeps the leading article, unlike the grouping key", () => {
+    // The whole reason this is a separate function. A catalogue knows the
+    // song as "The Trooper"; the grouping key deliberately does not.
+    expect(stripMasterSuffixes("The Trooper - 2015 Remaster")).toBe("The Trooper");
+    expect(normaliseReleaseTitle("The Trooper - 2015 Remaster")).toBe("trooper");
+  });
+
+  test("keeps casing, unlike the grouping key", () => {
+    expect(stripMasterSuffixes("Comfortably Numb")).toBe("Comfortably Numb");
+    expect(normaliseReleaseTitle("Comfortably Numb")).toBe("comfortably numb");
+  });
+
+  test("leaves a title with no marker untouched", () => {
+    // The near-miss: a dash that is part of the title must survive.
+    expect(stripMasterSuffixes("Tears in Heaven - Acoustic; Live at MTV Unplugged"))
+      .toBe("Tears in Heaven - Acoustic; Live at MTV Unplugged");
+  });
+
+  test("never returns empty", () => {
+    expect(stripMasterSuffixes("(Remastered)")).toBe("(Remastered)");
   });
 });

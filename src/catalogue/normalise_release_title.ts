@@ -110,6 +110,37 @@ function stripBareLivenessSuffix(title: string): string {
  *   would merge with every other blank.
  */
 export function normaliseReleaseTitle(title: string): string {
+  const working = stripMasterSuffixes(title);
+  const cleaned = stripLeadingArticle(working.toLowerCase());
+  return cleaned.length === 0 ? title.trim().toLowerCase() : cleaned;
+}
+
+/**
+ * Strip master markers, preserving the title's own words and casing.
+ *
+ * Separated from `normaliseReleaseTitle` because a *catalogue lookup* wants
+ * this and nothing more: the article and the casing are part of the name a
+ * catalogue knows, while `- Remastered 2009` is not.
+ *
+ * Measured on real misses, 2026-09-18. ListenBrainz found none of these and
+ * all four of their stripped forms:
+ *
+ * | Sent | Result |
+ * | --- | --- |
+ * | `Helter Skelter - Remastered 2009` | miss |
+ * | `Helter Skelter` | **hit** |
+ * | `Go Your Own Way - 2004 Remaster` | miss |
+ * | `Go Your Own Way` | **hit** |
+ *
+ * Lowercasing and article-stripping would be wrong here: `normaliseReleaseTitle`
+ * turns *The Trooper* into `trooper`, which is correct for grouping pressings
+ * of one release and wrong for asking a catalogue about a song.
+ *
+ * @param title - The title as the provider gave it.
+ * @returns The title without master or liveness suffixes, trimmed. Never
+ *   empty — a title that is nothing but markers keeps its original form.
+ */
+export function stripMasterSuffixes(title: string): string {
   let working = title.trim();
 
   for (let pass = 0; pass < MAXIMUM_SUFFIX_PASSES; pass += 1) {
@@ -139,8 +170,8 @@ export function normaliseReleaseTitle(title: string): string {
     break;
   }
 
-  const cleaned = stripLeadingArticle(working.trim().toLowerCase());
-  return cleaned.length === 0 ? title.trim().toLowerCase() : cleaned;
+  const trimmed = working.trim();
+  return trimmed.length === 0 ? title.trim() : trimmed;
 }
 
 /**
