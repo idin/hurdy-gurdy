@@ -37,6 +37,31 @@ const REQUEST_SPACING_MILLISECONDS = 1200;
 /** How long to wait out a rate-limit refusal before trying again. */
 const BUSY_BACKOFF_MILLISECONDS = 5000;
 
+/**
+ * How many times one recording may be retried before it is given up on.
+ *
+ * Bounded because the first version of this script was not, and stalled: a
+ * bare `continue` on a rate-limit refusal retried the same row forever, so one
+ * unlucky recording blocked the remaining 1,167. Observed 2026-09-18 — the
+ * pass advanced ten rows in forty minutes while a fresh request to the same
+ * endpoint returned 200 immediately, because the retries were themselves what
+ * kept the client throttled.
+ *
+ * The same shape as the resolver bug fixed that morning: an unbounded retry
+ * with nothing counting it looks identical to work in progress.
+ */
+const MAXIMUM_ATTEMPTS_PER_RECORDING = 3;
+
+/**
+ * Backoff between successive retries of one recording.
+ *
+ * Doubling, so a throttled client stops adding to the traffic that throttled
+ * it. A flat retry is what produced the stall.
+ */
+function findBackoffDelay(attempt: number): number {
+  return BUSY_BACKOFF_MILLISECONDS * 2 ** (attempt - 1);
+}
+
 const sleep = (milliseconds: number) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -55,36 +80,55 @@ async function main(): Promise<void> {
   let withWork = 0;
   let withoutWork = 0;
 
+  let givenUp = 0;
+
   for (const [index, row] of rows.entries()) {
-    try {
-      const detail = await findRecordingDetail(row.recording_mbid);
-      if (detail.workMbid !== null) {
-        withWork += 1;
-        const title = detail.workTitle === null ? "NULL" : quote(detail.workTitle);
-        console.log(
-          `UPDATE track SET work_mbid = ${quote(detail.workMbid)}, work_title = ${title} `
-            + `WHERE uri = ${quote(row.uri)};`,
-        );
-      } else {
-        // Not a failure. Recording-to-work is among the least complete
-        // relations in MusicBrainz, and a null means "it does not say".
-        withoutWork += 1;
+    // Bounded, and the bound is the point: an unbounded retry here stalled an
+    // entire pass on one recording.
+    for (let attempt = 1; attempt <= MAXIMUM_ATTEMPTS_PER_RECORDING; attempt += 1) {
+      try {
+        const detail = await findRecordingDetail(row.recording_mbid);
+        if (detail.workMbid !== null) {
+          withWork += 1;
+          const title = detail.workTitle === null ? "NULL" : quote(detail.workTitle);
+          console.log(
+            `UPDATE track SET work_mbid = ${quote(detail.workMbid)}, work_title = ${title} `
+              + `WHERE uri = ${quote(row.uri)};`,
+          );
+        } else {
+          // Not a failure. Recording-to-work is among the least complete
+          // relations in MusicBrainz, and a null means "it does not say".
+          withoutWork += 1;
+        }
+        break;
+      } catch (error) {
+        if (isMusicBrainzBusy(error) && attempt < MAXIMUM_ATTEMPTS_PER_RECORDING) {
+          await sleep(findBackoffDelay(attempt));
+          continue;
+        }
+        // Out of attempts, or a failure retrying cannot fix. Counted either
+        // way, so the totals always add up to the number of rows — a pass
+        // whose figures do not reconcile is a pass that lost track of itself.
+        if (isMusicBrainzBusy(error)) {
+          givenUp += 1;
+        } else {
+          withoutWork += 1;
+        }
+        break;
       }
-    } catch (error) {
-      if (isMusicBrainzBusy(error)) {
-        await sleep(BUSY_BACKOFF_MILLISECONDS);
-        continue;
-      }
-      withoutWork += 1;
     }
 
     if ((index + 1) % 100 === 0) {
-      console.error(`  ${index + 1}/${rows.length}  works=${withWork} none=${withoutWork}`);
+      console.error(
+        `  ${index + 1}/${rows.length}  works=${withWork} none=${withoutWork} gaveUp=${givenUp}`,
+      );
     }
     await sleep(REQUEST_SPACING_MILLISECONDS);
   }
 
-  console.error(`\n  DONE ${rows.length}: ${withWork} works, ${withoutWork} without`);
+  console.error(
+    `\n  DONE ${rows.length}: ${withWork} works, ${withoutWork} without, ${givenUp} gave up`,
+  );
 }
 
 void main();
