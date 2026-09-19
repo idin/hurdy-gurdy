@@ -10,12 +10,22 @@ Both came back decisive, and together they reorder the whole plan:
 | Check | Result |
 | --- | --- |
 | Spotify `audio-features` | **403 — withdrawn.** Not a path. |
-| AcousticBrainz by MBID | **61% hit rate.** Works, and returns more than expected. |
+| AcousticBrainz by MBID | **68% hit rate**, over 120 random MBIDs. |
 | *(unasked)* MBID coverage | **38 of 4,624 tracks.** The real bottleneck. |
 
-The third line was not a question this proposal asked, and it turned out to
-gate both of the others. Sections below carry their original text with the
-measured results marked inline; the Recommendation is rewritten.
+The third line was not a question this proposal asked, and it gated both of
+the others. It has since been fixed and run:
+
+| | Morning | Evening |
+| --- | --- | --- |
+| Recording MBIDs | 38 | **1,686** |
+| Work (composition) MBIDs | 0 | **409 and rising** |
+| Tracks reachable by AcousticBrainz | 23 | **~1,150** |
+
+**A fiftyfold change in what the free sources can reach**, from fixing three
+bugs rather than from downloading anything. Sections below carry their
+original text with measured results marked inline; the Recommendation is
+rewritten.
 
 ## What this would be for
 
@@ -325,13 +335,14 @@ thin — but if either works it reduces how much has to be analysed locally.
    | Sample | Coverage |
    | --- | --- |
    | First 12 | 11/12 (92%) |
-   | All 38 MBIDs in the catalogue | **23/38 (61%)** |
-   | 40 freshly-resolved MBIDs (2026-09-18) | **28/40 (70%)** |
+   | All 38 MBIDs then in the catalogue | 23/38 (61%) |
+   | 40 freshly-resolved MBIDs | 28/40 (70%) |
+   | **120 random from 1,686 resolved** | **81/120 (68%)** |
 
-   The third row is the one to plan on. It was measured on MBIDs the
-   ListenBrainz pass produced after the resolver was fixed — an independent
-   set from the 38, and therefore the first coverage figure here not drawn
-   from whatever handful happened to already exist.
+   **Plan on 68%.** Three independent samples — 61%, 70%, 68% — agree once
+   the sample is large enough to mean anything. The first row does not count:
+   twelve is not a sample, and it overstated the rate by 24 points, which is
+   how the second and third measurements came to be taken at all.
 
    **The second row is not a sample — it is the whole population.** The
    catalogue holds recording MBIDs for **38 of 4,624 tracks**, so the
@@ -398,11 +409,27 @@ useful thing is now a network call rather than a 75 GB download.
    | The resolver called MusicBrainz directly at 1 req/sec, not ListenBrainz at 30 per 9s | `resolve_artist_totals.ts` now maps through ListenBrainz and calls MusicBrainz only for the work relation |
    | `searchRecording` compared seconds against milliseconds, so no search could ever match | Same bug log |
 
-   The ListenBrainz path is verified working — 4 of 5 spot-checked tracks
-   matched, including the Windmills case — and a full pass over the queued
-   tracks is running. Whatever it yields multiplies directly into the
-   AcousticBrainz figure below, because that harvest is keyed on exactly
-   these MBIDs.
+   **The full pass completed 2026-09-18.** Measured, not projected:
+
+   | | |
+   | --- | --- |
+   | Tracks attempted | 1,963 |
+   | ListenBrainz matched | **1,648 (84.0%)** |
+   | Of those, carrying a work relation | **74%** |
+
+   So the library went from 38 recording MBIDs to 1,648, and from **zero**
+   compositions to a populated work layer. The work rate of 74% is far above
+   what `musicbrainz_client.ts` warns about ("among the least complete
+   relations in a crowd-sourced database") — true in general, evidently not
+   for this library.
+
+   The composition layer immediately did the thing it was built for. Among
+   the first 555 resolved tracks, 25 compositions group more than one
+   recording, led by **The Windmills of Your Mind with four** — the exact
+   case Idin caught over-merging on 2026-09-13, now correctly separated as
+   four recordings and correctly joined as one composition. Others include
+   *Inch'Allah* across the spellings `Inch Allah` and `Inch allah`, which no
+   string match would have joined.
 2. **Then harvest AcousticBrainz.** It needs no ffmpeg, no Python, no audio
    and no local files — only MBIDs. At a 61% hit rate it answers tempo,
    key, loudness, timbre and 18 classifier outputs for three in five
