@@ -274,7 +274,8 @@ async function resolveMusicBrainzIdentity(
 ): Promise<void> {
   const row = await database
     .prepare(
-      `SELECT t.isrc, t.name, t.duration_seconds, MIN(a.name) AS artist_name
+      `SELECT t.isrc, t.name, t.duration_seconds, t.recording_mbid,
+              MIN(a.name) AS artist_name
          FROM track t
          LEFT JOIN track_artist ta ON ta.track_uri = t.uri
          LEFT JOIN artist a ON a.uri = ta.artist_uri
@@ -286,6 +287,7 @@ async function resolveMusicBrainzIdentity(
       isrc: string | null;
       name: string;
       duration_seconds: number | null;
+      recording_mbid: string | null;
       artist_name: string | null;
     }>();
 
@@ -295,6 +297,17 @@ async function resolveMusicBrainzIdentity(
   }
 
   try {
+    // Already identified: the only thing left to fetch is the composition.
+    // Re-running the name lookup would spend a request rediscovering an
+    // answer already stored — which matters because a bulk pass over
+    // already-resolved tracks is exactly how this task gets re-enqueued.
+    if (row.recording_mbid !== null) {
+      const detail = await findRecordingDetail(row.recording_mbid);
+      await writeRecordingIdentity(database, task.subjectUri, detail);
+      await completeResolution(database, task);
+      return;
+    }
+
     let recordingMbid: string | null = null;
 
     // ListenBrainz first: 30 requests per nine seconds against MusicBrainz's

@@ -32,6 +32,8 @@ import {
   RESOLUTION_PRIORITY,
 } from "./resolver/resolution_queue";
 import { runResolutionTask } from "./resolver/resolve_artist_totals";
+import { isMusicBrainzBusy } from "./catalogue/musicbrainz_client";
+import { isListenBrainzRateLimited } from "./catalogue/listenbrainz_client";
 import { findNextTickDelay } from "./resolver/resolver_schedule";
 import { isSpotifyRateLimited, SpotifyApiClient } from "./providers/spotify/spotify_api_client";
 import { SpotifyProvider } from "./providers/spotify/spotify_provider";
@@ -308,7 +310,17 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
     } catch (error) {
       // A rate-limited resolver is making no progress, and ticking again
       // immediately spends the quota it is waiting on.
-      rateLimited = isSpotifyRateLimited(error);
+      //
+      // Every upstream, not just Spotify. A MusicBrainz 503 falling through to
+      // the ordinary three-second tick would keep calling a service that just
+      // said stop — and their limit is global per IP, so exceeding it blocks
+      // every other request from this address rather than only the excess.
+      // Measured 2026-09-19: a bulk pass managed seven lookups in an hour
+      // against exactly that, because nothing was reading the refusal.
+      rateLimited =
+        isSpotifyRateLimited(error)
+        || isMusicBrainzBusy(error)
+        || isListenBrainzRateLimited(error);
 
       // A rate limit is transient and must not count against the task — the
       // work was never attempted, the quota simply ran out. Anything else is
