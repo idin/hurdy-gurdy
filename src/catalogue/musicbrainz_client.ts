@@ -37,6 +37,27 @@ const MUSICBRAINZ_API_BASE = "https://musicbrainz.org/ws/2";
  */
 export const MUSICBRAINZ_USER_AGENT = "hurdy-gurdy/1.0 ( idin@ixmachina.ai )";
 
+/**
+ * How long one request may take before it is abandoned.
+ *
+ * **Node's `fetch` has no default timeout**, so a connection that is accepted
+ * and never answered hangs until the operating system gives up. Measured
+ * 2026-09-19: one `findRecordingDetail` call took **1,022,647 ms — seventeen
+ * minutes** — before failing, while its five neighbours averaged 300 ms. That
+ * single row dragged a 30-row pass to 75 seconds per row and projected a
+ * 23-minute job to 24 hours.
+ *
+ * Ten seconds is more than thirty times the observed p100 of a healthy
+ * response. A request still running past it is not slow, it is dead, and
+ * failing it fast turns a silent hang into one counted error the caller can
+ * retry or skip.
+ *
+ * The Worker is not exposed to this — Cloudflare bounds a request's wall time
+ * on its own — but every command-line script importing this client is, and
+ * bulk passes are how the catalogue actually gets filled.
+ */
+const REQUEST_TIMEOUT_MILLISECONDS = 10_000;
+
 /** Thrown when MusicBrainz refuses or is unavailable. */
 export class MusicBrainzError extends Error {
   readonly status: number;
@@ -154,6 +175,7 @@ export async function findRecordingDetail(
 async function requestJson<Result>(path: string, fetcher: typeof fetch): Promise<Result> {
   const response = await fetcher(`${MUSICBRAINZ_API_BASE}${path}`, {
     headers: { "User-Agent": MUSICBRAINZ_USER_AGENT, Accept: "application/json" },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS),
   });
 
   if (!response.ok) {

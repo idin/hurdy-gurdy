@@ -33,6 +33,21 @@ const LISTENBRAINZ_API_BASE = "https://api.listenbrainz.org/1";
  */
 export const LISTENBRAINZ_REQUESTS_PER_WINDOW = 30;
 
+/**
+ * How long one request may take before it is abandoned.
+ *
+ * Node's `fetch` has no default timeout, so a connection that is accepted and
+ * never answered hangs indefinitely. Measured against MusicBrainz on
+ * 2026-09-19: one call ran seventeen minutes before failing while its
+ * neighbours averaged 300 ms. Nothing about that failure was specific to
+ * MusicBrainz — it is a property of `fetch`, so the same bound applies here.
+ *
+ * Matches `REQUEST_TIMEOUT_MILLISECONDS` in `musicbrainz_client.ts`
+ * deliberately: two catalogue clients with different patience would be a
+ * difference a reader has to explain, and there is no reason for one.
+ */
+const REQUEST_TIMEOUT_MILLISECONDS = 10_000;
+
 /** Thrown when ListenBrainz refuses. */
 export class ListenBrainzError extends Error {
   readonly status: number;
@@ -84,6 +99,7 @@ export async function mapRecording(
 
   const response = await fetcher(url, {
     headers: { Authorization: `Token ${token}` },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS),
   });
 
   if (!response.ok) {
