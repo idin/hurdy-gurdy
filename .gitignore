@@ -23,3 +23,6 @@ worker-configuration.d.ts
 
 # macOS
 .DS_Store
+
+# Editor tooling that records sessions.
+.specstory/
