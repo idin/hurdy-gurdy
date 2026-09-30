@@ -20,6 +20,8 @@
  * answer nobody can explain beats a slow right one.
  */
 
+import type { z } from "zod";
+
 import type {
   Album,
   Artist,
@@ -37,6 +39,12 @@ import {
   recordFetchSpend,
 } from "../quota/fetch_budget";
 import { buildCacheKey } from "./cache_entry";
+import {
+  ALBUM_PAGE_SCHEMA,
+  ARTIST_PAGE_SCHEMA,
+  PLAYLIST_PAGE_SCHEMA,
+  TRACK_PAGE_SCHEMA,
+} from "./cached_payload_schemas";
 import {
   findAlbumCoverage,
   findArtistCoverage,
@@ -131,10 +139,16 @@ export class CachedMediaProvider implements MediaProvider {
    * revalidation needs the provider to send a conditional request and this
    * layer does not have one — that is `freshness_check.ts`'s job, wired in at
    * the client.
+   *
+   * So is an entry whose payload no longer matches `schema`. A page cached by
+   * older code outlives the types it was written with, and serving it is how
+   * liked tracks failed on 2026-09-30 — see `cached_payload_schemas.ts`. The
+   * refetch overwrites it, so each old entry costs one fetch, once.
    */
   private async readThrough<Item>(
     method: string,
     parameters: Record<string, string | number | undefined>,
+    schema: z.ZodType<Page<Item>>,
     fetchPage: () => Promise<Page<Item>>,
   ): Promise<Page<Item>> {
     const key = buildCacheKey(this.name, method, parameters);
@@ -143,7 +157,23 @@ export class CachedMediaProvider implements MediaProvider {
       await prepareMediaCache(this.database);
       const lookup = await findCachedResponse(this.database, key, this.now());
       if (lookup.state === "fresh") {
-        return JSON.parse(lookup.entry.payload) as Page<Item>;
+        const cached = schema.safeParse(JSON.parse(lookup.entry.payload));
+        if (cached.success) {
+          return cached.data;
+        }
+        // Said out loud, because a rejection is otherwise invisible: the read
+        // still succeeds, just without the cache. One per old entry is the
+        // expected cost of a type change; the same key rejected on every read
+        // means the schema and the provider disagree, which is a bug.
+        const [issue] = cached.error.issues;
+        console.warn(
+          JSON.stringify({
+            kind: "cached_payload_rejected",
+            key,
+            path: issue?.path.join("."),
+            message: issue?.message,
+          }),
+        );
       }
     } catch {
       // Fall through to the provider. A broken cache is a slow server, not a
@@ -349,7 +379,7 @@ export class CachedMediaProvider implements MediaProvider {
   }
 
   async getLikedTracks(options: { limit?: number; cursor?: string } = {}): Promise<Page<Track>> {
-    const page = await this.readThrough("getLikedTracks", { ...options }, () =>
+    const page = await this.readThrough("getLikedTracks", { ...options }, TRACK_PAGE_SCHEMA, () =>
       this.inner.getLikedTracks(options),
     );
     // Recorded on every read, cache hit included: the rows are what the
@@ -367,7 +397,7 @@ export class CachedMediaProvider implements MediaProvider {
   async getFollowedArtists(
     options: { limit?: number; cursor?: string } = {},
   ): Promise<Page<Artist>> {
-    const page = await this.readThrough("getFollowedArtists", { ...options }, () =>
+    const page = await this.readThrough("getFollowedArtists", { ...options }, ARTIST_PAGE_SCHEMA, () =>
       this.inner.getFollowedArtists(options),
     );
     await recordArtists(this.database, page.items, { isFollowed: true, now: this.now() });
@@ -379,7 +409,7 @@ export class CachedMediaProvider implements MediaProvider {
   }
 
   async getSavedAlbums(options: { limit?: number; cursor?: string } = {}): Promise<Page<Album>> {
-    const page = await this.readThrough("getSavedAlbums", { ...options }, () =>
+    const page = await this.readThrough("getSavedAlbums", { ...options }, ALBUM_PAGE_SCHEMA, () =>
       this.inner.getSavedAlbums(options),
     );
     await recordAlbums(this.database, page.items, { isSaved: true, now: this.now() });
@@ -387,7 +417,7 @@ export class CachedMediaProvider implements MediaProvider {
   }
 
   async getPlaylists(options: { limit?: number; cursor?: string } = {}): Promise<Page<Playlist>> {
-    const page = await this.readThrough("getPlaylists", { ...options }, () =>
+    const page = await this.readThrough("getPlaylists", { ...options }, PLAYLIST_PAGE_SCHEMA, () =>
       this.inner.getPlaylists(options),
     );
     await recordPlaylists(this.database, page.items, { now: this.now() });
@@ -398,8 +428,11 @@ export class CachedMediaProvider implements MediaProvider {
     playlistId: string,
     options: { limit?: number; cursor?: string } = {},
   ): Promise<Page<Track>> {
-    const page = await this.readThrough("getPlaylistTracks", { playlistId, ...options }, () =>
-      this.inner.getPlaylistTracks(playlistId, options),
+    const page = await this.readThrough(
+      "getPlaylistTracks",
+      { playlistId, ...options },
+      TRACK_PAGE_SCHEMA,
+      () => this.inner.getPlaylistTracks(playlistId, options),
     );
     // The playlist URI is not on the page, and the tool layer passes an id.
     await recordPlaylistTracks(this.database, `spotify:playlist:${playlistId}`, page, {

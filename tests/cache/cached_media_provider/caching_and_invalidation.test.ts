@@ -1,9 +1,9 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { CachedMediaProvider } from "../../src/cache/cached_media_provider";
-import { prepareMediaCache } from "../../src/cache/media_cache_store";
-import type { Album, Artist, MediaProvider, Page, Track } from "../../src/providers/media_provider";
+import { CachedMediaProvider } from "../../../src/cache/cached_media_provider";
+import { prepareMediaCache } from "../../../src/cache/media_cache_store";
+import type { Album, Artist, MediaProvider, Page, Track } from "../../../src/providers/media_provider";
 
 /**
  * Against a real D1, because the point of this layer is what the database
@@ -136,6 +136,67 @@ beforeEach(async () => {
 });
 
 describe("reading through the cache", () => {
+  // One per cached read, because each checks its payload against its own
+  // schema — a schema wrongly refusing valid pages would switch the cache off
+  // for that method while every other test still passed.
+  test("a repeated read of followed artists is served from cache", async () => {
+    const { provider, calls } = countingProvider();
+    const cached = new CachedMediaProvider(provider, database, () => NOW);
+
+    await cached.getFollowedArtists();
+    await cached.getFollowedArtists();
+
+    expect(calls.getFollowedArtists).toBe(1);
+  });
+
+  test("a repeated read of saved albums is served from cache", async () => {
+    const { provider, calls } = countingProvider();
+    const cached = new CachedMediaProvider(provider, database, () => NOW);
+
+    await cached.getSavedAlbums();
+    await cached.getSavedAlbums();
+
+    expect(calls.getSavedAlbums).toBe(1);
+  });
+
+  test("a repeated read of playlists is served from cache", async () => {
+    const { provider, calls } = countingProvider({
+      async getPlaylists() {
+        calls.getPlaylists = (calls.getPlaylists ?? 0) + 1;
+        return {
+          items: [
+            {
+              uri: "spotify:playlist:37i9dQZF1DX4UtSsGT1Sbe",
+              inLibrary: true,
+              id: "37i9dQZF1DX4UtSsGT1Sbe",
+              name: "All Out 70s",
+              ownerName: "Spotify",
+              trackCount: 150,
+            },
+          ],
+          nextCursor: null,
+          total: 1,
+        };
+      },
+    });
+    const cached = new CachedMediaProvider(provider, database, () => NOW);
+
+    await cached.getPlaylists();
+    await cached.getPlaylists();
+
+    expect(calls.getPlaylists).toBe(1);
+  });
+
+  test("a repeated read of playlist tracks is served from cache", async () => {
+    const { provider, calls } = countingProvider();
+    const cached = new CachedMediaProvider(provider, database, () => NOW);
+
+    await cached.getPlaylistTracks("37i9dQZF1DX4UtSsGT1Sbe");
+    await cached.getPlaylistTracks("37i9dQZF1DX4UtSsGT1Sbe");
+
+    expect(calls.getPlaylistTracks).toBe(1);
+  });
+
   test("a repeated read does not reach the provider twice", async () => {
     const { provider, calls } = countingProvider();
     const cached = new CachedMediaProvider(provider, database, () => NOW);
