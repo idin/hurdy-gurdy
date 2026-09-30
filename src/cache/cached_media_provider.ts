@@ -161,6 +161,19 @@ export class CachedMediaProvider implements MediaProvider {
         if (cached.success) {
           return cached.data;
         }
+        // Said out loud, because a rejection is otherwise invisible: the read
+        // still succeeds, just without the cache. One per old entry is the
+        // expected cost of a type change; the same key rejected on every read
+        // means the schema and the provider disagree, which is a bug.
+        const [issue] = cached.error.issues;
+        console.warn(
+          JSON.stringify({
+            kind: "cached_payload_rejected",
+            key,
+            path: issue?.path.join("."),
+            message: issue?.message,
+          }),
+        );
       }
     } catch {
       // Fall through to the provider. A broken cache is a slow server, not a

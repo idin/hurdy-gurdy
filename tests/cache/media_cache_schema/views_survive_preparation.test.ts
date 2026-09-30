@@ -16,7 +16,7 @@
 import { env } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 
-import { prepareMediaCache } from "../../src/cache/media_cache_store";
+import { prepareMediaCache } from "../../../src/cache/media_cache_store";
 
 const database = env.MEDIA_CACHE as D1Database;
 
@@ -56,8 +56,8 @@ describe("views survive preparation", () => {
     // a fresh process against the same live database, which is exactly what
     // the migration step ran against. Forcing both steps again reproduces it.
     await prepareMediaCache(database);
-    const { applyMigrations } = await import("../../src/cache/apply_migrations");
-    const { MEDIA_CACHE_SCHEMA } = await import("../../src/cache/media_cache_schema");
+    const { applyMigrations } = await import("../../../src/cache/apply_migrations");
+    const { MEDIA_CACHE_SCHEMA } = await import("../../../src/cache/media_cache_schema");
     await database.batch(MEDIA_CACHE_SCHEMA.map((statement) => database.prepare(statement)));
     await applyMigrations(database);
 
@@ -71,7 +71,7 @@ describe("views survive preparation", () => {
     // The general rule, checked structurally rather than by outcome. A DROP
     // in the migration list always runs after the schema batch, so anything
     // it removes is removed unconditionally on every startup.
-    const { MIGRATIONS } = await import("../../src/cache/apply_migrations");
+    const { MIGRATIONS } = await import("../../../src/cache/apply_migrations");
     const dropping = MIGRATIONS.filter((migration) =>
       /\bDROP\b/i.test(migration.statement),
     );

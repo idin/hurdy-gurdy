@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  type CheckTypesEqual,
+  type TypeEquality,
   SCHEMAS_MATCH_TYPES,
   TRACK_PAGE_SCHEMA,
 } from "../../src/cache/cached_payload_schemas";
@@ -28,34 +28,49 @@ const CURRENT_TRACK = {
   isrc: "GBN9Y1100088",
 };
 
-function pageOf(items: unknown[]) {
+function buildPage(items: unknown[]) {
   return { items, nextCursor: null, total: items.length };
 }
 
 describe("the track page schema", () => {
   test("accepts a page as today's code writes it", () => {
-    expect(TRACK_PAGE_SCHEMA.safeParse(pageOf([CURRENT_TRACK])).success).toBe(true);
+    expect(TRACK_PAGE_SCHEMA.safeParse(buildPage([CURRENT_TRACK])).success).toBe(true);
+  });
+
+  test("accepts a local file, which Spotify sends with a null id", () => {
+    // Refusing this once made every playlist holding a local file refetch on
+    // every read.
+    const localFile = {
+      ...CURRENT_TRACK,
+      id: null,
+      uri: "spotify:local:David+Wise:Donkey+Kong+Country%3A+Tropical+Freeze:Snomads+Island:127",
+      artists: [],
+      artistNames: ["David Wise"],
+      albumUri: null,
+      isrc: null,
+    };
+    expect(TRACK_PAGE_SCHEMA.safeParse(buildPage([localFile])).success).toBe(true);
   });
 
   test("accepts a track with no ISRC, which Spotify sends as null", () => {
     const localFile = { ...CURRENT_TRACK, isrc: null, albumTrackCount: null };
-    expect(TRACK_PAGE_SCHEMA.safeParse(pageOf([localFile])).success).toBe(true);
+    expect(TRACK_PAGE_SCHEMA.safeParse(buildPage([localFile])).success).toBe(true);
   });
 
   test("refuses a page from before durationSeconds, which stored milliseconds", () => {
     const { durationSeconds: _, ...withoutSeconds } = CURRENT_TRACK;
     const beforeSeconds = { ...withoutSeconds, durationMs: 382826 };
-    expect(TRACK_PAGE_SCHEMA.safeParse(pageOf([beforeSeconds])).success).toBe(false);
+    expect(TRACK_PAGE_SCHEMA.safeParse(buildPage([beforeSeconds])).success).toBe(false);
   });
 
   test("refuses a page from before ISRC, where the field is absent rather than null", () => {
     const { isrc: _, albumTrackCount: __, ...beforeIsrc } = CURRENT_TRACK;
-    expect(TRACK_PAGE_SCHEMA.safeParse(pageOf([beforeIsrc])).success).toBe(false);
+    expect(TRACK_PAGE_SCHEMA.safeParse(buildPage([beforeIsrc])).success).toBe(false);
   });
 
   test("refuses the whole page when only one of its tracks is old", () => {
     const { durationSeconds: _, ...oldTrack } = CURRENT_TRACK;
-    expect(TRACK_PAGE_SCHEMA.safeParse(pageOf([CURRENT_TRACK, oldTrack])).success).toBe(false);
+    expect(TRACK_PAGE_SCHEMA.safeParse(buildPage([CURRENT_TRACK, oldTrack])).success).toBe(false);
   });
 });
 
@@ -67,6 +82,9 @@ describe("the drift guard", () => {
       album: true,
       playlist: true,
       trackPage: true,
+      artistPage: true,
+      albumPage: true,
+      playlistPage: true,
     });
   });
 
@@ -79,29 +97,29 @@ describe("the drift guard", () => {
 
   test("an intersection and a flat object with the same fields are equal", () => {
     // The case that made the first version of the guard fire on correct code.
-    const answer: CheckTypesEqual<Membership & { isrc: string | null }, FlatTrack> = true;
+    const answer: TypeEquality<Membership & { isrc: string | null }, FlatTrack> = true;
     expect(answer).toBe(true);
   });
 
   test("a missing field is a difference", () => {
-    const answer: CheckTypesEqual<Membership, FlatTrack> = false;
+    const answer: TypeEquality<Membership, FlatTrack> = false;
     expect(answer).toBe(false);
   });
 
   test("a field that became nullable is a difference", () => {
-    const answer: CheckTypesEqual<Membership & { isrc: string }, FlatTrack> = false;
+    const answer: TypeEquality<Membership & { isrc: string }, FlatTrack> = false;
     expect(answer).toBe(false);
   });
 
   test("an optional field is not the same as a nullable required one", () => {
     // The near-miss: `isrc?:` accepts an absent field, which is exactly the
     // old-shape payload the schema exists to refuse.
-    const answer: CheckTypesEqual<Membership & { isrc?: string | null }, FlatTrack> = false;
+    const answer: TypeEquality<Membership & { isrc?: string | null }, FlatTrack> = false;
     expect(answer).toBe(false);
   });
 
   test("a difference nested inside an array is still a difference", () => {
-    const answer: CheckTypesEqual<
+    const answer: TypeEquality<
       { artists: { uri: string; name: string }[] },
       { artists: { uri: string }[] }
     > = false;

@@ -38,7 +38,9 @@ Playlists read fine because the playlist list's shape hasn't changed.
 
 ## Evidence
 
-`tests/cache/cached_payload_from_an_older_shape.test.ts` seeds the cache with
+`tests/cache/cached_payload_from_an_older_shape.test.ts` (since moved to
+`tests/cache/cached_media_provider/older_payload_shapes.test.ts`; the output
+below keeps the path it ran under) seeds the cache with
 the exact shapes those versions stored. Run 2026-09-30:
 
 ```

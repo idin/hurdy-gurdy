@@ -39,7 +39,9 @@ const LIBRARY_COVERAGE_SHAPE = {
 
 export const TRACK_SCHEMA = z.object({
   ...LIBRARY_MEMBERSHIP_SHAPE,
-  id: z.string(),
+  // Null for a local file. Requiring a string here once made every playlist
+  // holding one refetch on every read.
+  id: z.string().nullable(),
   name: z.string(),
   artists: z.array(z.object({ uri: z.string(), name: z.string() })),
   artistNames: z.array(z.string()),
@@ -108,23 +110,35 @@ export const PLAYLIST_PAGE_SCHEMA = buildPageSchema(PLAYLIST_SCHEMA);
 // object; the exact check tells those apart even when every field agrees,
 // which would make the guard fire on correct code.
 
-type FlattenType<Value> = Value extends (infer Element)[]
-  ? FlattenType<Element>[]
+type FlattenedType<Value> = Value extends (infer Element)[]
+  ? FlattenedType<Element>[]
   : Value extends object
-    ? { [Key in keyof Value]: FlattenType<Value[Key]> }
+    ? { [Key in keyof Value]: FlattenedType<Value[Key]> }
     : Value;
 
-export type CheckTypesEqual<Left, Right> =
-  (<Probe>() => Probe extends FlattenType<Left> ? 1 : 2) extends <
+export type TypeEquality<Left, Right> =
+  (<Probe>() => Probe extends FlattenedType<Left> ? 1 : 2) extends <
     Probe,
-  >() => Probe extends FlattenType<Right> ? 1 : 2
+  >() => Probe extends FlattenedType<Right> ? 1 : 2
     ? true
     : false;
 
 export const SCHEMAS_MATCH_TYPES: {
-  track: CheckTypesEqual<z.infer<typeof TRACK_SCHEMA>, Track>;
-  artist: CheckTypesEqual<z.infer<typeof ARTIST_SCHEMA>, Artist>;
-  album: CheckTypesEqual<z.infer<typeof ALBUM_SCHEMA>, Album>;
-  playlist: CheckTypesEqual<z.infer<typeof PLAYLIST_SCHEMA>, Playlist>;
-  trackPage: CheckTypesEqual<z.infer<typeof TRACK_PAGE_SCHEMA>, Page<Track>>;
-} = { track: true, artist: true, album: true, playlist: true, trackPage: true };
+  track: TypeEquality<z.infer<typeof TRACK_SCHEMA>, Track>;
+  artist: TypeEquality<z.infer<typeof ARTIST_SCHEMA>, Artist>;
+  album: TypeEquality<z.infer<typeof ALBUM_SCHEMA>, Album>;
+  playlist: TypeEquality<z.infer<typeof PLAYLIST_SCHEMA>, Playlist>;
+  trackPage: TypeEquality<z.infer<typeof TRACK_PAGE_SCHEMA>, Page<Track>>;
+  artistPage: TypeEquality<z.infer<typeof ARTIST_PAGE_SCHEMA>, Page<Artist>>;
+  albumPage: TypeEquality<z.infer<typeof ALBUM_PAGE_SCHEMA>, Page<Album>>;
+  playlistPage: TypeEquality<z.infer<typeof PLAYLIST_PAGE_SCHEMA>, Page<Playlist>>;
+} = {
+  track: true,
+  artist: true,
+  album: true,
+  playlist: true,
+  trackPage: true,
+  artistPage: true,
+  albumPage: true,
+  playlistPage: true,
+};

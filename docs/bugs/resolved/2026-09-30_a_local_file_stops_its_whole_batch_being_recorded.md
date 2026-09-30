@@ -37,3 +37,22 @@ identity: no id, no ISRC, and no artist or album ids. So `recordTracks` and
 comment, and the tool still returns the local file in the page. This fixes
 the cause, which is binding a null into a column that can't hold one, instead
 of catching the failure afterwards.
+
+## Fixed and verified — 2026-09-30
+
+- `findCatalogueTracks` in `record_library_facts.ts` keeps only tracks with
+  an id. `recordTracks` and `recordPlaylistTracks` write only those, so a
+  null never reaches the `NOT NULL` column. The local file is still
+  returned in the page.
+
+Regression test, now green (2026-09-30):
+
+```
+ ✓ |worker| tests/cache/cached_media_provider/local_files.test.ts > a playlist holding local files > still records the catalogue track that shares its page 3ms
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+```
+
+Full suite: 361 passed. The only 2 failures are
+`tests/cache/media_cache_schema/artist_coverage.test.ts`, the regression tests
+for the separate, still-unresolved artist-coverage bug.

@@ -45,3 +45,24 @@ Type the ids as `string | null` in `SpotifyTrack`. In `toTrack`:
 
 The comment claiming the two lists line up by position is corrected, because
 for a local file they no longer do.
+
+## Fixed and verified — 2026-09-30
+
+- `toTrack` builds an artist identity only for an artist with an id, and
+  sets `albumUri` to null when the album has none. `artistNames` still
+  holds every credited name.
+- `Track.artistNames`'s comment no longer claims the two lists line up by
+  position.
+
+Regression test, now green (2026-09-30):
+
+```
+ ✓ |worker| tests/cache/cached_media_provider/local_files.test.ts > a playlist holding local files > does not merge two local artists into one fake artist 3ms
+ ✓ |worker| tests/cache/cached_media_provider/local_files.test.ts > a playlist holding local files > does not merge two local albums into one fake album 2ms
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+```
+
+Full suite: 361 passed. The only 2 failures are
+`tests/cache/media_cache_schema/artist_coverage.test.ts`, the regression tests
+for the separate, still-unresolved artist-coverage bug.
