@@ -100,9 +100,14 @@ export type SpotifyAlbum = {
 };
 
 export type SpotifyTrack = {
-  id: string;
+  /**
+   * Null for a local file, as are the album's and every artist's ids —
+   * documented on Spotify's Playlists concept page, where a local track also
+   * has `external_ids: {}` and a `spotify:local:` URI.
+   */
+  id: string | null;
   name: string;
-  artists: { id: string; name: string }[];
+  artists: { id: string | null; name: string }[];
   /**
    * The album, which carries its own track count on a full track object.
    *
@@ -110,7 +115,7 @@ export type SpotifyTrack = {
    * and it arrives free on every `/me/tracks` page — so a library read
    * supplies it without a separate album fetch.
    */
-  album: { id: string; name: string; total_tracks?: number; release_date?: string };
+  album: { id: string | null; name: string; total_tracks?: number; release_date?: string };
   duration_ms: number;
   /**
    * External identifiers, of which the ISRC is the one that matters.

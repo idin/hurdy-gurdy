@@ -50,6 +50,23 @@ async function runQuietly(
 }
 
 /**
+ * The tracks that belong in the library tables.
+ *
+ * Those tables model catalogue tracks, and a local file has no catalogue
+ * identity — no id, no ISRC, no artist or album ids. Its null id also cannot
+ * go into `track.id`, which is `NOT NULL`, and a failed insert takes its whole
+ * atomic batch with it: on 2026-09-30 one local file stopped every other
+ * track on its page being recorded, silently. So it is left out here, on
+ * purpose, and still returned to the caller in the page it arrived on.
+ *
+ * @param tracks - What the provider returned.
+ * @returns Only the tracks with a catalogue id, narrowed to say so.
+ */
+function findCatalogueTracks(tracks: Track[]): (Track & { id: string })[] {
+  return tracks.filter((track): track is Track & { id: string } => track.id !== null);
+}
+
+/**
  * Record tracks, and whether they are liked.
  *
  * `isLiked` is passed rather than inferred from the track, because the same
@@ -72,13 +89,14 @@ export async function recordTracks(
   tracks: Track[],
   options: { isLiked: boolean; now: number },
 ): Promise<void> {
-  if (tracks.length === 0) {
+  const catalogueTracks = findCatalogueTracks(tracks);
+  if (catalogueTracks.length === 0) {
     return;
   }
   const liked = options.isLiked ? 1 : 0;
   const statements: D1PreparedStatement[] = [];
 
-  for (const track of tracks) {
+  for (const track of catalogueTracks) {
     statements.push(
       database
         .prepare(
@@ -283,15 +301,23 @@ export async function recordPlaylistTracks(
   // track nobody recorded would join to nothing in the views.
   await recordTracks(database, page.items, { isLiked: false, now: options.now });
 
-  const statements = page.items.map((track, index) =>
-    database
-      .prepare(
-        `INSERT INTO playlist_track (playlist_uri, track_uri, position)
-           VALUES (?, ?, ?)
-         ON CONFLICT(playlist_uri, track_uri) DO UPDATE SET position = excluded.position`,
-      )
-      .bind(playlistUri, track.uri, index),
-  );
+  // Positions stay the playlist's own, local files included, so a catalogue
+  // track keeps the position it has in the playlist; only the local files'
+  // rows are absent, because their tracks were never recorded.
+  const statements = page.items.flatMap((track, index) => {
+    if (track.id === null) {
+      return [];
+    }
+    return [
+      database
+        .prepare(
+          `INSERT INTO playlist_track (playlist_uri, track_uri, position)
+             VALUES (?, ?, ?)
+           ON CONFLICT(playlist_uri, track_uri) DO UPDATE SET position = excluded.position`,
+        )
+        .bind(playlistUri, track.uri, index),
+    ];
+  });
 
   await runQuietly(database, statements);
 }
