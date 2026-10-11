@@ -92,6 +92,29 @@ describe("where the same-song rule must not fire", () => {
     expect(await likedSongCount(QUEEN.uri)).toBe(2);
   });
 
+  test("two same-title tracks with a zero duration stay two songs", async () => {
+    // An export row has no length and is recorded with 0; 0 means unknown,
+    // so it must not be read as two tracks of identical length.
+    await like([
+      likedTrack({
+        uri: "spotify:track:zero1",
+        name: "Bohemian Rhapsody",
+        artists: [QUEEN],
+        durationSeconds: 0,
+        isrc: "GBUM71029601",
+      }),
+      likedTrack({
+        uri: "spotify:track:zero2",
+        name: "Bohemian Rhapsody",
+        artists: [QUEEN],
+        durationSeconds: 0,
+        isrc: "GBUM71029602",
+      }),
+    ]);
+
+    expect(await likedSongCount(QUEEN.uri)).toBe(2);
+  });
+
   test("a track with an unknown duration still counts as itself", async () => {
     await like([
       likedTrack({
