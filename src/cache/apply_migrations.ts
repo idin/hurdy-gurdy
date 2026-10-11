@@ -91,6 +91,13 @@ export const MIGRATIONS: readonly Migration[] = [
     description: "track gains normalised_title, with which pressings of one song are matched per artist",
     statement: "ALTER TABLE track ADD COLUMN normalised_title TEXT",
   },
+  {
+    // A migration, not a schema statement: on an existing database the column
+    // only exists once the entry above has run, and artist_liked_song probes
+    // this column once per liked track (quadratic per artist without it).
+    description: "track gains an index on normalised_title, for the artist_liked_song view",
+    statement: "CREATE INDEX IF NOT EXISTS track_normalised_title ON track (normalised_title)",
+  },
 ];
 
 /**

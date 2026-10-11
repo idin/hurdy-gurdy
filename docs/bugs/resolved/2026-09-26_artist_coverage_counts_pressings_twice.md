@@ -139,3 +139,8 @@ Green, run 2026-10-11 (full suite: 33 files, 336 tests passed):
 /albums/{id}/tracks` per release, new tables and resolver kinds), which is a
 separate piece of work; `advanceTrackCount` still sums `total_tracks`, so
 "N of M" mixes songs with pressings on the M side until then.
+
+Review note (2026-10-11): rows inserted by the Spotify export importer
+(`src/export/import_spotify_export.ts`, `scripts/build_export_import_sql.ts`)
+also have no `normalised_title` until `recordTracks` rewrites them; they have no
+duration either, so they are never merged and no count is wrong.
