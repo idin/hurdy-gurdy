@@ -110,3 +110,11 @@ removed; it was still defined, unused. It is now actually removed from
 `SpotifyApiClient`. The remove-items body change (`tracks` to `items`) was
 checked against https://developer.spotify.com/documentation/web-api/reference/remove-items-playlist
 on 2026-10-11.
+
+Correction (2026-10-11, review round 3): the entries above are out of date.
+The remove-items body (`items`, was `tracks`) now has a test,
+`tests/providers/spotify/remove_playlist_items_endpoint.test.ts`, and the
+scope-persistence tests (token scope stored in the session, a refused write's
+error naming method, path and granted scopes) now exist too. Current result of
+`npx vitest run tests/providers`: 7 files, 54 tests passed (earlier: 6 files,
+45 tests). The "No test yet; needs a tester" note no longer applies.
