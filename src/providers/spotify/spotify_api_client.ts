@@ -19,6 +19,9 @@ const SPOTIFY_API_BASE = "https://api.spotify.com/v1";
  */
 const MILLISECONDS_PER_SECOND = 1000;
 
+/** Shown in a refused write's error when the session stored no scopes (one made before they were kept). */
+export const UNKNOWN_GRANTED_SCOPES = "unknown";
+
 /** The maximum `limit` Spotify's search endpoint accepts, per item type. */
 export const SEARCH_MAX_LIMIT = 10;
 
@@ -165,8 +168,26 @@ export class SpotifyApiError extends Error {
   readonly status: number;
   readonly retryAfterSeconds: number | null;
 
-  constructor(options: { status: number; body: string; retryAfterSeconds: number | null }) {
-    super(`Spotify API returned ${options.status}: ${options.body}`);
+  /**
+   * @param options.request - The refused write, when known. Spotify's 403
+   *   body says nothing about which request failed or which scopes the token
+   *   held, so a write names both: otherwise a missing scope and a removed
+   *   endpoint look identical.
+   */
+  constructor(options: {
+    status: number;
+    body: string;
+    retryAfterSeconds: number | null;
+    request?: { method: string; path: string; grantedScopes: string[] | null };
+  }) {
+    const requestNote = options.request
+      ? ` (${options.request.method} ${options.request.path}; granted scopes: ${
+          options.request.grantedScopes === null
+            ? UNKNOWN_GRANTED_SCOPES
+            : options.request.grantedScopes.join(" ")
+        })`
+      : "";
+    super(`Spotify API returned ${options.status}: ${options.body}${requestNote}`);
     this.name = "SpotifyApiError";
     this.status = options.status;
     this.retryAfterSeconds = options.retryAfterSeconds;
@@ -207,9 +228,17 @@ export function isNoActiveDevice(error: unknown): boolean {
  */
 export class SpotifyApiClient {
   private readonly accessToken: string;
+  private readonly grantedScopes: string[] | null;
 
-  constructor(accessToken: string) {
+  /**
+   * @param accessToken - The user's Spotify access token.
+   * @param options.grantedScopes - Scopes Spotify granted with the token, or
+   *   null when the session predates storing them. Only used to explain a
+   *   refused write.
+   */
+  constructor(accessToken: string, options: { grantedScopes: string[] | null } = { grantedScopes: null }) {
     this.accessToken = accessToken;
+    this.grantedScopes = options.grantedScopes;
   }
 
   private async get<Result>(path: string, parameters: Record<string, string | number | undefined>): Promise<Result> {
@@ -286,6 +315,7 @@ export class SpotifyApiClient {
         status: response.status,
         body,
         retryAfterSeconds: retryAfterHeader ? Number(retryAfterHeader) : null,
+        request: { method, path, grantedScopes: this.grantedScopes },
       });
     }
 
@@ -406,6 +436,9 @@ export class SpotifyApiClient {
    * DELETE /v1/playlists/{id}/items — remove tracks from a playlist.
    * Scope: playlist-modify-public / playlist-modify-private.
    *
+   * The body field is `items`, as in Spotify's current remove-items
+   * reference (checked 2026-10-11); the old `/tracks` endpoint took `tracks`.
+   *
    * Irreversible: Spotify offers no undo, and the removed tracks are not
    * recoverable through the API. Guarded by two-step confirmation at the
    * tool layer.
@@ -415,19 +448,21 @@ export class SpotifyApiClient {
     uris: string[],
   ): Promise<{ snapshot_id: string } | null> {
     return this.write("DELETE", `/playlists/${playlistId}/items`, {
-      body: { tracks: uris.map((uri) => ({ uri })) },
+      body: { items: uris.map((uri) => ({ uri })) },
     });
   }
 
   /**
-   * POST /v1/users/{id}/playlists — create a playlist.
+   * POST /v1/me/playlists — create a playlist for the authenticated user.
    * Scope: playlist-modify-public / playlist-modify-private.
+   *
+   * Not `POST /users/{id}/playlists`: Spotify's February 2026 changelog
+   * removed it ("Use `POST /me/playlists` instead") and it answers 403.
    */
   async createPlaylist(
-    userId: string,
     details: { name: string; description?: string; public?: boolean },
   ): Promise<SpotifyPlaylist | null> {
-    return this.write("POST", `/users/${userId}/playlists`, { body: details });
+    return this.write("POST", "/me/playlists", { body: details });
   }
 
   /**
@@ -503,9 +538,6 @@ export class SpotifyApiClient {
   /**
    * GET /v1/me — the authenticated user's profile.
    *
-   * Needed because creating a playlist posts to `/users/{id}/playlists`, and
-   * the id has to come from somewhere. Spotify has no "me" alias for that
-   * path.
    */
   async getCurrentUser(): Promise<{ id: string; display_name: string | null }> {
     return this.get("/me", {});
