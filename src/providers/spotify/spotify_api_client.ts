@@ -536,14 +536,6 @@ export class SpotifyApiClient {
   }
 
   /**
-   * GET /v1/me — the authenticated user's profile.
-   *
-   */
-  async getCurrentUser(): Promise<{ id: string; display_name: string | null }> {
-    return this.get("/me", {});
-  }
-
-  /**
    * GET /v1/me/library/contains — which of these URIs are in the library.
    *
    * One call answers every type at once — tracks, albums, artists and

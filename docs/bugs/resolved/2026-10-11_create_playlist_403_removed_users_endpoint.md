@@ -104,3 +104,9 @@ failures remain, all identical before the fix (`database` undefined in
 `prepareMediaCache`: no D1 binding in this worktree; 6 unrelated type errors
 in `tests/resolver/musicbrainz_resolution_routing.test.ts` and
 `tests/cache/views_survive_preparation.test.ts`). Before the fix: 79 failures.
+
+Correction (review round 1): the entry above said `getCurrentUser()` was
+removed; it was still defined, unused. It is now actually removed from
+`SpotifyApiClient`. The remove-items body change (`tracks` to `items`) was
+checked against https://developer.spotify.com/documentation/web-api/reference/remove-items-playlist
+on 2026-10-11.
