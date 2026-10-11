@@ -87,6 +87,10 @@ export const MIGRATIONS: readonly Migration[] = [
     description: "track gains work_title",
     statement: "ALTER TABLE track ADD COLUMN work_title TEXT",
   },
+  {
+    description: "track gains normalised_title, with which pressings of one song are matched per artist",
+    statement: "ALTER TABLE track ADD COLUMN normalised_title TEXT",
+  },
 ];
 
 /**
