@@ -331,7 +331,7 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
    * at 248.4s and 246.9s straddle a bucket edge but are 1.5s apart.
    *
    * The artist comes from the join, never from the title, so two artists'
-   * "Windmills of Your Mind" never meet. A track without a title or duration
+   * "Windmills of Your Mind" never meet. A track without a known (positive) duration
    * to compare is its own song, since merging on a missing value would group
    * every such track together.
    */
@@ -351,8 +351,10 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
             AND other.is_liked = 1
             AND other.uri <> track.uri
             AND other.normalised_title = track.normalised_title
-            AND other.duration_seconds IS NOT NULL
-            AND track.duration_seconds IS NOT NULL
+            -- 0 is the placeholder recordTracks stores for an unknown length,
+            -- so it is as unknown as NULL; two unknowns are not 0 seconds apart.
+            AND other.duration_seconds > 0
+            AND track.duration_seconds > 0
             AND ABS(other.duration_seconds - track.duration_seconds)
                   <= ${SAME_SONG_DURATION_TOLERANCE_SECONDS}
             AND (other.duration_seconds < track.duration_seconds
