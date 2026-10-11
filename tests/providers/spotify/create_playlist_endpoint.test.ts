@@ -5,7 +5,7 @@ import { SPOTIFY_SCOPES } from "../../../src/providers/spotify/spotify_oauth";
 import { SpotifyProvider } from "../../../src/providers/spotify/spotify_provider";
 
 /**
- * Regression for docs/bugs/unresolved/2026-10-11_create_playlist_403_removed_users_endpoint.md.
+ * Regression for docs/bugs/resolved/2026-10-11_create_playlist_403_removed_users_endpoint.md.
  *
  * Spotify's February 2026 changelog marks `POST /users/{user_id}/playlists`
  * as removed ("Use `POST /me/playlists` instead"). This stands in for the
