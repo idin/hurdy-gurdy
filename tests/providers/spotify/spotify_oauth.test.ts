@@ -119,6 +119,14 @@ function answerTokenRequestWith(body: Record<string, unknown>): void {
   ) as unknown as typeof fetch;
 }
 
+const EXCHANGE_PARAMETERS = {
+  clientId: "client",
+  redirectUri: "https://example.workers.dev/callback",
+  code: "code",
+  codeVerifier: "verifier",
+  now: () => 0,
+};
+
 describe("granted scopes in token responses", () => {
   test("exchangeCodeForTokens returns the scopes Spotify granted", async () => {
     answerTokenRequestWith({
@@ -128,13 +136,7 @@ describe("granted scopes in token responses", () => {
       scope: "playlist-modify-private playlist-modify-public",
     });
 
-    const tokens = await exchangeCodeForTokens({
-      clientId: "client",
-      redirectUri: "https://example.workers.dev/callback",
-      code: "code",
-      codeVerifier: "verifier",
-      now: () => 0,
-    });
+    const tokens = await exchangeCodeForTokens(EXCHANGE_PARAMETERS);
 
     expect(tokens.grantedScopes).toEqual(["playlist-modify-private", "playlist-modify-public"]);
   });
@@ -142,13 +144,7 @@ describe("granted scopes in token responses", () => {
   test("exchangeCodeForTokens reports unknown scopes as null when the response has no scope", async () => {
     answerTokenRequestWith({ access_token: "a", refresh_token: "r", expires_in: 3600 });
 
-    const tokens = await exchangeCodeForTokens({
-      clientId: "client",
-      redirectUri: "https://example.workers.dev/callback",
-      code: "code",
-      codeVerifier: "verifier",
-      now: () => 0,
-    });
+    const tokens = await exchangeCodeForTokens(EXCHANGE_PARAMETERS);
 
     expect(tokens.grantedScopes).toBeNull();
   });

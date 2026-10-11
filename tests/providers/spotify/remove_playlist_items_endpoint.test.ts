@@ -32,9 +32,7 @@ function installSpotifyNetwork(): RecordedRequest[] {
         { status: 400 },
       );
     }
-    return new Response(JSON.stringify({ error: { status: 403, message: "Forbidden" } }), {
-      status: 403,
-    });
+    return new Response("{}", { status: 403 });
   }) as unknown as typeof fetch;
   return requests;
 }

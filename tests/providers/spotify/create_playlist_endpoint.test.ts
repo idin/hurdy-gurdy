@@ -38,22 +38,22 @@ function installSpotifyNetwork(): RecordedRequest[] {
         { status: 201 },
       );
     }
-    return new Response(JSON.stringify({ error: { status: 403, message: "Forbidden" } }), {
-      status: 403,
-    });
+    return new Response("{}", { status: 403 });
   }) as unknown as typeof fetch;
   return requests;
 }
 
-/** Makes the network edge answer the next request with a 403, as Spotify does for a refused write. */
-function refuseNextWrite(): void {
-  const answerRoutes = globalThis.fetch;
-  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    globalThis.fetch = answerRoutes;
-    return new Response(JSON.stringify({ error: { status: 403, message: "Forbidden" } }), {
-      status: 403,
-    });
-  }) as unknown as typeof fetch;
+/** Makes the network edge refuse every request with a 403, as Spotify does for a refused write. */
+function refuseWrites(): void {
+  globalThis.fetch = vi.fn(
+    async () => new Response("{}", { status: 403 }),
+  ) as unknown as typeof fetch;
+}
+
+function captureRenameFailure(provider: SpotifyProvider): Promise<unknown> {
+  return provider
+    .updatePlaylistDetails("playlist-1", { name: "renamed" })
+    .then(() => null, (error: unknown) => error);
 }
 
 const originalFetch = globalThis.fetch;
@@ -79,25 +79,18 @@ describe("create_playlist against the current Spotify Web API", () => {
     installSpotifyNetwork();
     const provider = new SpotifyProvider("access-token");
 
-    const created = await provider.createPlaylist({ name: PLAYLIST_NAME });
-
-    expect(created.id).toBe("playlist-1");
+    expect((await provider.createPlaylist({ name: PLAYLIST_NAME })).id).toBe("playlist-1");
   });
 });
 
 describe("a refused write names what was attempted", () => {
   test("the error carries the method, the path and the granted scopes", async () => {
-    installSpotifyNetwork();
-    // Refuse this write explicitly with a 403, so the test does not depend on
-    // the fake's fallback answer for unlisted routes.
-    refuseNextWrite();
+    refuseWrites();
     const provider = new SpotifyProvider("access-token", {
       grantedScopes: [...SPOTIFY_SCOPES],
     });
 
-    const failure = await provider
-      .updatePlaylistDetails("playlist-1", { name: "renamed" })
-      .then(() => null, (error: unknown) => error);
+    const failure = await captureRenameFailure(provider);
 
     expect(failure).toBeInstanceOf(SpotifyApiError);
     const message = (failure as SpotifyApiError).message;
@@ -108,13 +101,10 @@ describe("a refused write names what was attempted", () => {
   });
 
   test("says the scopes are unknown when none are known", async () => {
-    installSpotifyNetwork();
-    refuseNextWrite();
+    refuseWrites();
     const provider = new SpotifyProvider("access-token");
 
-    const failure = await provider
-      .updatePlaylistDetails("playlist-1", { name: "renamed" })
-      .then(() => null, (error: unknown) => error);
+    const failure = await captureRenameFailure(provider);
 
     expect(failure).toBeInstanceOf(SpotifyApiError);
     expect((failure as SpotifyApiError).message).toContain(UNKNOWN_GRANTED_SCOPES);

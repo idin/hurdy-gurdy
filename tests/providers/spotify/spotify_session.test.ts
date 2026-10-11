@@ -90,6 +90,7 @@ function answerRefreshWith(body: Record<string, unknown>): void {
   ) as unknown as typeof fetch;
 }
 
+const REFRESH_DUE = { clientId: "client", now: () => 999_500 };
 const SCOPES = ["playlist-modify-private", "playlist-modify-public"];
 
 describe("getSessionTokens granted scopes", () => {
@@ -120,13 +121,10 @@ describe("getSessionTokens granted scopes", () => {
     await storeSession(kv, "user-1", { ...TOKENS, grantedScopes: SCOPES });
     answerRefreshWith({ access_token: "access-2", expires_in: 3600 });
 
-    const refreshed = await getSessionTokens(kv, "user-1", {
-      clientId: "client",
-      now: () => 999_500,
-    });
+    const refreshed = await getSessionTokens(kv, "user-1", REFRESH_DUE);
     expect(refreshed).toEqual({ accessToken: "access-2", grantedScopes: SCOPES });
 
-    const reloaded = await getSessionTokens(kv, "user-1", { clientId: "client", now: () => 999_500 });
+    const reloaded = await getSessionTokens(kv, "user-1", REFRESH_DUE);
     expect(reloaded.grantedScopes).toEqual(SCOPES);
   });
 
@@ -135,10 +133,7 @@ describe("getSessionTokens granted scopes", () => {
     await storeSession(kv, "user-1", { ...TOKENS, grantedScopes: SCOPES });
     answerRefreshWith({ access_token: "access-2", expires_in: 3600, scope: "user-library-read" });
 
-    const refreshed = await getSessionTokens(kv, "user-1", {
-      clientId: "client",
-      now: () => 999_500,
-    });
+    const refreshed = await getSessionTokens(kv, "user-1", REFRESH_DUE);
 
     expect(refreshed.grantedScopes).toEqual(["user-library-read"]);
   });
