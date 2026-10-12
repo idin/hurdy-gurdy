@@ -63,3 +63,48 @@ Group 1: type the literals in `tests/resolver/musicbrainz_resolution_routing.tes
 as `ResolutionPriority` (or `ResolutionTask`) so `priority` is not widened.
 Group 2: see the findings above. A tester may edit test files, but this is left to
 the builder.
+
+## Resolution (appended 2026-10-12)
+
+### Root cause of Group 2 (the two `MEDIA_CACHE` errors)
+
+The tests' `env` (from `cloudflare:test`) is typed `Cloudflare.Env`. That interface is
+declared only in the generated, gitignored `worker-configuration.d.ts` at the repository
+root, which `tests/tsconfig.json` (`include: ["**/*.ts"]`, relative to `tests/`) never
+loads. So the tests saw an empty `Cloudflare.Env` however the file was regenerated.
+Including the generated file was tried and rejected: it made `src/index.ts` fail
+(`Env` from `src/types.ts` has optional `MEDIA_CACHE`, the generated one requires it),
+and its contents depend on each developer's private `wrangler.jsonc`.
+
+### Fix (tests only, so one tester pull request)
+
+- `tests/cloudflare_test_environment.d.ts` makes `Cloudflare.Env` extend the production
+  `Env` of `src/types.ts`, so the tests see exactly the bindings the Worker declares and
+  nothing depends on a generated file or a private config.
+- `tests/resolver/musicbrainz_resolution_routing.test.ts`: `TASK` is typed
+  `ResolutionTask` with `RESOLUTION_PRIORITY.BACKFILL` (the value `1` it had), so
+  `priority` is not widened to `number` (Group 1).
+
+### Red, before the fix (`npm run typecheck`, with the real `wrangler.jsonc` and a fresh `npx wrangler types`)
+
+```
+tests/cache/media_cache_schema/views_survive_preparation.test.ts(21,22): error TS2339: Property 'MEDIA_CACHE' does not exist on type 'Env'.
+tests/resolver/musicbrainz_resolution_routing.test.ts(22,22): error TS2339: Property 'MEDIA_CACHE' does not exist on type 'Env'.
+tests/resolver/musicbrainz_resolution_routing.test.ts(74,41): error TS2322: ... Type 'number' is not assignable to type 'ResolutionPriority'.
+tests/resolver/musicbrainz_resolution_routing.test.ts(80,58): error TS2345: ...
+tests/resolver/musicbrainz_resolution_routing.test.ts(93,58): error TS2345: ...
+tests/resolver/musicbrainz_resolution_routing.test.ts(105,58): error TS2345: ...
+```
+
+### Green, after the fix
+
+```
+> hurdy-gurdy@0.18.0 typecheck
+> tsc --noEmit -p tsconfig.json && tsc --noEmit -p tests/tsconfig.json
+
+exit=0
+```
+
+Also green without the generated `worker-configuration.d.ts` present. Full suite
+(`npx vitest run --project worker --project repository --maxWorkers=2`):
+41 files, 387 tests passed.

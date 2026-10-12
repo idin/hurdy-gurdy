@@ -92,17 +92,27 @@ export class CachedMediaProvider implements MediaProvider {
    */
   private readonly userId: string | null;
 
+  /**
+   * Where a warning line goes.
+   *
+   * A parameter so a test can read the lines with a real recording function
+   * instead of replacing `console.warn`; production keeps the console.
+   */
+  private readonly writeWarning: (message: string) => void;
+
   constructor(
     inner: MediaProvider,
     database: D1Database,
     now: Clock = () => Date.now(),
     userId: string | null = null,
+    writeWarning: (message: string) => void = (message) => console.warn(message),
   ) {
     this.inner = inner;
     this.database = database;
     this.now = now;
     this.name = inner.name;
     this.userId = userId;
+    this.writeWarning = writeWarning;
   }
 
   /**
@@ -167,7 +177,7 @@ export class CachedMediaProvider implements MediaProvider {
         // expected cost of a type change; the same key rejected on every read
         // means the schema and the provider disagree, which is a bug.
         const [issue] = cached.error.issues;
-        console.warn(
+        this.writeWarning(
           JSON.stringify({
             kind: "cached_payload_rejected",
             key,

@@ -15,7 +15,8 @@ import { env } from "cloudflare:test";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { prepareMediaCache } from "../../src/cache/media_cache_store";
-import { enqueueResolutions } from "../../src/resolver/resolution_queue";
+import { enqueueResolutions, RESOLUTION_PRIORITY } from "../../src/resolver/resolution_queue";
+import type { ResolutionTask } from "../../src/resolver/resolution_queue";
 import { runResolutionTask } from "../../src/resolver/resolve_artist_totals";
 import { SpotifyApiClient } from "../../src/providers/spotify/spotify_api_client";
 
@@ -24,10 +25,10 @@ const database = env.MEDIA_CACHE as D1Database;
 /** Never reached on this path; any call through it is a routing failure. */
 const UNUSABLE_CLIENT = new SpotifyApiClient("not-a-real-token");
 
-const TASK = {
-  kind: "resolve-musicbrainz" as const,
+const TASK: ResolutionTask = {
+  kind: "resolve-musicbrainz",
   subjectUri: "spotify:track:t1",
-  priority: 1,
+  priority: RESOLUTION_PRIORITY.BACKFILL,
   cursor: null,
   accumulated: 0,
   attempts: 0,
