@@ -59,18 +59,22 @@ const UNRESOLVED_MEMBERSHIP = { inLibrary: false } as const;
 const MILLISECONDS_PER_SECOND = 1000;
 
 function toTrack(track: SpotifyTrack): Track {
-  const artists = (track.artists ?? []).map((artist) => ({
-    uri: `spotify:artist:${artist.id}`,
-    name: artist.name,
-  }));
+  const credited = track.artists ?? [];
+  // Only artists with an id become identities. A local file's artists have
+  // none, and a URI built from a null id is the string "spotify:artist:null",
+  // shared by every local artist at once.
+  const artists = credited.flatMap((artist) =>
+    artist.id === null ? [] : [{ uri: `spotify:artist:${artist.id}`, name: artist.name }],
+  );
+  const albumId = track.album?.id ?? null;
   return {
     ...UNRESOLVED_MEMBERSHIP,
     id: track.id,
     name: track.name,
     artists,
-    artistNames: artists.map((artist) => artist.name),
+    artistNames: credited.map((artist) => artist.name),
     albumName: track.album?.name ?? null,
-    albumUri: track.album?.id === undefined ? null : `spotify:album:${track.album.id}`,
+    albumUri: albumId === null ? null : `spotify:album:${albumId}`,
     // Free on a full track object, and the denominator for album coverage.
     albumTrackCount: track.album?.total_tracks ?? null,
     // The one place milliseconds become seconds. Spotify is the only source

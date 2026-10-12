@@ -1,9 +1,9 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { CachedMediaProvider } from "../../src/cache/cached_media_provider";
-import { prepareMediaCache } from "../../src/cache/media_cache_store";
-import type { Album, Artist, MediaProvider, Page, Track } from "../../src/providers/media_provider";
+import { CachedMediaProvider } from "../../../src/cache/cached_media_provider";
+import { prepareMediaCache } from "../../../src/cache/media_cache_store";
+import type { Album, Artist, MediaProvider, Page, Track } from "../../../src/providers/media_provider";
 
 /**
  * Against a real D1, because the point of this layer is what the database
