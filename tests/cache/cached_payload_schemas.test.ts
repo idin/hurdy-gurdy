@@ -77,8 +77,9 @@ describe("the track page schema", () => {
 // only compiles while every schema matches its type. Nothing here runs: a
 // runtime assertion on a constant the compiler has already fixed cannot fail.
 // Each line below instead stops `npm run typecheck` if the guard answers
-// wrongly. A case that must be `true` is a plain annotation; a case that must
-// be `false` is annotated `true` under `@ts-expect-error`, which itself fails
+// wrongly. Each case is the expression `true satisfies TypeEquality<...>`, which needs
+// name, so nothing to keep alive; a case that must be `false` sits under
+// `@ts-expect-error`, which itself fails
 // the typecheck if the guard stops reporting the difference.
 
 type Membership = { uri: string; inLibrary: boolean };
@@ -86,33 +87,33 @@ type FlatTrack = { uri: string; inLibrary: boolean; isrc: string | null };
 
 // An intersection and a flat object with the same fields are equal — the case
 // that made the first version of the guard fire on correct code.
-export const intersectionEqualsFlatObject: TypeEquality<
+true satisfies TypeEquality<
   Membership & { isrc: string | null },
   FlatTrack
-> = true;
+>;
 
 // A missing field is a difference.
 // @ts-expect-error the types differ, so the guard must not answer true
-export const missingFieldIsADifference: TypeEquality<Membership, FlatTrack> = true;
+true satisfies TypeEquality<Membership, FlatTrack>;
 
 // A field that became non-nullable is a difference.
 // @ts-expect-error the types differ, so the guard must not answer true
-export const changedNullabilityIsADifference: TypeEquality<
+true satisfies TypeEquality<
   Membership & { isrc: string },
   FlatTrack
-> = true;
+>;
 
 // The near-miss: `isrc?:` accepts an absent field, which is exactly the
 // old-shape payload the schema exists to refuse.
 // @ts-expect-error the types differ, so the guard must not answer true
-export const optionalIsNotNullable: TypeEquality<
+true satisfies TypeEquality<
   Membership & { isrc?: string | null },
   FlatTrack
-> = true;
+>;
 
 // A difference nested inside an array is still a difference.
 // @ts-expect-error the types differ, so the guard must not answer true
-export const nestedDifferenceInArrayIsADifference: TypeEquality<
+true satisfies TypeEquality<
   { artists: { uri: string; name: string }[] },
   { artists: { uri: string }[] }
-> = true;
+>;

@@ -1,9 +1,10 @@
-import { env } from "cloudflare:workers";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "vitest";
 
 import { CachedMediaProvider } from "../../../src/cache/cached_media_provider";
 import { prepareMediaCache } from "../../../src/cache/media_cache_store";
 import { SpotifyProvider } from "../../../src/providers/spotify/spotify_provider";
+import { startLocalWorkersStorage, type LocalWorkersStorage } from "../../local_workers_storage";
+import { startLocalSpotifyServer, type LocalSpotifyServer } from "../../providers/spotify/local_spotify_server";
 
 /**
  * A playlist can hold the user's own local files, and Spotify describes those
@@ -17,10 +18,10 @@ import { SpotifyProvider } from "../../../src/providers/spotify/spotify_provider
  * for a different artist and album, because the merging bug needs two.
  *
  * Run end to end — Spotify's JSON, through the real mapper and the real cache
- * layer, into a real D1 — with only `fetch` faked, as the provider tests do.
+ * layer, into a real D1 (Miniflare's), over a real local HTTP server playing
+ * Spotify. Nothing is replaced.
  */
 
-const database = (env as { MEDIA_CACHE: D1Database }).MEDIA_CACHE;
 const NOW = Date.parse("2026-09-30T12:00:00Z");
 const PLAYLIST_ID = "37i9dQZF1DX4UtSsGT1Sbe";
 
@@ -96,11 +97,22 @@ const PLAYLIST_ITEMS_RESPONSE = {
   ],
 };
 
-const originalFetch = globalThis.fetch;
-let spotifyRequests = 0;
+let storage: LocalWorkersStorage;
+let database: D1Database;
+let server: LocalSpotifyServer;
+
+beforeAll(async () => {
+  storage = await startLocalWorkersStorage();
+  database = storage.database;
+});
+
+afterAll(async () => {
+  await storage.dispose();
+});
 
 function buildCachedProvider(): CachedMediaProvider {
-  return new CachedMediaProvider(new SpotifyProvider("test-token"), database, () => NOW);
+  const inner = new SpotifyProvider("test-token", { apiBaseUrl: server.apiBaseUrl });
+  return new CachedMediaProvider(inner, { database, now: () => NOW });
 }
 
 beforeEach(async () => {
@@ -116,15 +128,13 @@ beforeEach(async () => {
   ]) {
     await database.prepare(`DELETE FROM ${table}`).run();
   }
-  spotifyRequests = 0;
-  globalThis.fetch = vi.fn(async () => {
-    spotifyRequests += 1;
-    return new Response(JSON.stringify(PLAYLIST_ITEMS_RESPONSE), { status: 200 });
-  }) as unknown as typeof fetch;
+  server = await startLocalSpotifyServer({
+    respond: () => ({ status: 200, body: PLAYLIST_ITEMS_RESPONSE }),
+  });
 });
 
-afterEach(() => {
-  globalThis.fetch = originalFetch;
+afterEach(async () => {
+  await server.close();
 });
 
 describe("a playlist holding local files", () => {
@@ -134,7 +144,7 @@ describe("a playlist holding local files", () => {
     await cached.getPlaylistTracks(PLAYLIST_ID);
     await cached.getPlaylistTracks(PLAYLIST_ID);
 
-    expect(spotifyRequests).toBe(1);
+    expect(server.requests).toHaveLength(1);
   });
 
   test("still records the catalogue track that shares its page", async () => {

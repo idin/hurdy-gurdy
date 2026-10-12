@@ -72,7 +72,7 @@ beforeEach(async () => {
 describe("what the budget counts", () => {
   test("a cache miss costs one fetch", async () => {
     const { provider } = countingProvider();
-    const cached = new CachedMediaProvider(provider, database, () => NOW, USER);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW, userId: USER });
 
     await cached.getLikedTracks();
 
@@ -82,7 +82,7 @@ describe("what the budget counts", () => {
   test("a cache HIT costs nothing", async () => {
     // The whole point. If this fails, the budget punishes caching.
     const { provider, getCalls } = countingProvider();
-    const cached = new CachedMediaProvider(provider, database, () => NOW, USER);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW, userId: USER });
 
     await cached.getLikedTracks();
     await cached.getLikedTracks();
@@ -94,7 +94,7 @@ describe("what the budget counts", () => {
 
   test("a hundred reads of one thing cost one fetch", async () => {
     const { provider } = countingProvider();
-    const cached = new CachedMediaProvider(provider, database, () => NOW, USER);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW, userId: USER });
 
     for (let read = 0; read < 100; read += 1) {
       await cached.getLikedTracks();
@@ -106,7 +106,7 @@ describe("what the budget counts", () => {
   test("nothing is charged when no user is set", async () => {
     // Single-user deployments have nobody to bill, and the check is overhead.
     const { provider } = countingProvider();
-    const cached = new CachedMediaProvider(provider, database, () => NOW);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW });
 
     await cached.getLikedTracks();
 
@@ -118,7 +118,7 @@ describe("enforcement", () => {
   test("refuses once the budget is spent", async () => {
     await recordFetchSpend(database, USER, 10_000, NOW);
     const { provider } = countingProvider();
-    const cached = new CachedMediaProvider(provider, database, () => NOW, USER);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW, userId: USER });
 
     await expect(cached.getLikedTracks()).rejects.toThrow(/Monthly limit reached/);
   });
@@ -128,7 +128,7 @@ describe("enforcement", () => {
     // the entire cached catalogue is still available.
     await recordFetchSpend(database, USER, 10_000, NOW);
     const { provider } = countingProvider();
-    const cached = new CachedMediaProvider(provider, database, () => NOW, USER);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW, userId: USER });
 
     await expect(cached.getLikedTracks()).rejects.toThrow(/already cached still works/);
   });
@@ -137,7 +137,7 @@ describe("enforcement", () => {
     // The behaviour that makes the limit tolerable, and the reason the check
     // sits on the miss path rather than at the top of the method.
     const { provider } = countingProvider();
-    const cached = new CachedMediaProvider(provider, database, () => NOW, USER);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW, userId: USER });
     await cached.getLikedTracks();
 
     await recordFetchSpend(database, USER, 10_000, NOW);

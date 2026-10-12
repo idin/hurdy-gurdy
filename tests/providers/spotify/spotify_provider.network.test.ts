@@ -1,16 +1,26 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 
 import { SpotifyProvider } from "../../../src/providers/spotify/spotify_provider";
+import { startLocalSpotifyServer, type LocalSpotifyServer } from "./local_spotify_server";
 
 /**
- * Fakes `fetch` with real Spotify Web API response shapes, copied from
- * Spotify's own published reference examples rather than invented — what is
- * under test here is `SpotifyProvider`'s mapping from those shapes onto
- * `MediaProvider`, not Spotify's API itself, which is exercised for real
- * once integration credentials exist.
+ * Serves real Spotify Web API response shapes, copied from Spotify's own
+ * published reference examples rather than invented, from a real local HTTP
+ * server. What is under test here is `SpotifyProvider`'s mapping from those
+ * shapes onto `MediaProvider`, not Spotify's API itself, which is exercised
+ * for real once integration credentials exist.
  */
-function fakeSpotifyFetch(responseBody: unknown): typeof fetch {
-  return vi.fn(async () => new Response(JSON.stringify(responseBody), { status: 200 })) as unknown as typeof fetch;
+let server: LocalSpotifyServer | null = null;
+
+afterEach(async () => {
+  await server?.close();
+  server = null;
+});
+
+/** Starts a server that answers every request with `responseBody`, and returns a provider pointed at it. */
+async function providerServing(responseBody: unknown): Promise<SpotifyProvider> {
+  server = await startLocalSpotifyServer({ respond: () => ({ status: 200, body: responseBody }) });
+  return new SpotifyProvider("test-token", { apiBaseUrl: server.apiBaseUrl });
 }
 
 const SAVED_TRACKS_RESPONSE = {
@@ -94,8 +104,7 @@ describe("SpotifyProvider.getPlaylists", () => {
     // undefined (reading 'total')" because toPlaylist read
     // playlist.tracks.total unguarded. See
     // playbook/bugs/resolved/2026-09-13_get_playlists_crashes_when_spotify_omits_the_tracks_summary.md
-    globalThis.fetch = fakeSpotifyFetch(PLAYLISTS_RESPONSE_WITHOUT_TRACK_SUMMARY);
-    const provider = new SpotifyProvider("test-token");
+    const provider = await providerServing(PLAYLISTS_RESPONSE_WITHOUT_TRACK_SUMMARY);
 
     const page = await provider.getPlaylists();
 
@@ -106,8 +115,7 @@ describe("SpotifyProvider.getPlaylists", () => {
   test("reports an unknown track count as null, never as zero", async () => {
     // null and 0 are different claims. A playlist whose count Spotify did
     // not report is not a playlist with no tracks.
-    globalThis.fetch = fakeSpotifyFetch(PLAYLISTS_RESPONSE_WITHOUT_TRACK_SUMMARY);
-    const provider = new SpotifyProvider("test-token");
+    const provider = await providerServing(PLAYLISTS_RESPONSE_WITHOUT_TRACK_SUMMARY);
 
     const page = await provider.getPlaylists();
 
@@ -115,8 +123,7 @@ describe("SpotifyProvider.getPlaylists", () => {
   });
 
   test("falls back to the owner id when display_name is null", async () => {
-    globalThis.fetch = fakeSpotifyFetch(PLAYLISTS_RESPONSE_WITHOUT_TRACK_SUMMARY);
-    const provider = new SpotifyProvider("test-token");
+    const provider = await providerServing(PLAYLISTS_RESPONSE_WITHOUT_TRACK_SUMMARY);
 
     const page = await provider.getPlaylists();
 
@@ -126,7 +133,7 @@ describe("SpotifyProvider.getPlaylists", () => {
 
   test("still reports a real track count when Spotify does send one", async () => {
     // The near-miss: the fix must not discard a count that is present.
-    globalThis.fetch = fakeSpotifyFetch({
+    const provider = await providerServing({
       ...PLAYLISTS_RESPONSE_WITHOUT_TRACK_SUMMARY,
       items: [
         {
@@ -135,7 +142,6 @@ describe("SpotifyProvider.getPlaylists", () => {
         },
       ],
     });
-    const provider = new SpotifyProvider("test-token");
 
     const page = await provider.getPlaylists();
 
@@ -145,8 +151,7 @@ describe("SpotifyProvider.getPlaylists", () => {
 
 describe("SpotifyProvider.getLikedTracks", () => {
   test("maps a Spotify saved-tracks page onto the shared Track shape", async () => {
-    globalThis.fetch = fakeSpotifyFetch(SAVED_TRACKS_RESPONSE);
-    const provider = new SpotifyProvider("test-token");
+    const provider = await providerServing(SAVED_TRACKS_RESPONSE);
 
     const page = await provider.getLikedTracks();
 
@@ -171,8 +176,7 @@ describe("SpotifyProvider.getLikedTracks", () => {
   });
 
   test("a present next URL becomes a non-null offset cursor", async () => {
-    globalThis.fetch = fakeSpotifyFetch(SAVED_TRACKS_RESPONSE);
-    const provider = new SpotifyProvider("test-token");
+    const provider = await providerServing(SAVED_TRACKS_RESPONSE);
 
     const page = await provider.getLikedTracks();
 
@@ -181,8 +185,7 @@ describe("SpotifyProvider.getLikedTracks", () => {
   });
 
   test("a null next URL means no more pages", async () => {
-    globalThis.fetch = fakeSpotifyFetch({ ...SAVED_TRACKS_RESPONSE, next: null });
-    const provider = new SpotifyProvider("test-token");
+    const provider = await providerServing({ ...SAVED_TRACKS_RESPONSE, next: null });
 
     const page = await provider.getLikedTracks();
 
@@ -192,8 +195,7 @@ describe("SpotifyProvider.getLikedTracks", () => {
 
 describe("SpotifyProvider.getFollowedArtists", () => {
   test("maps a cursor-paginated response onto the shared Page shape", async () => {
-    globalThis.fetch = fakeSpotifyFetch(FOLLOWED_ARTISTS_RESPONSE);
-    const provider = new SpotifyProvider("test-token");
+    const provider = await providerServing(FOLLOWED_ARTISTS_RESPONSE);
 
     const page = await provider.getFollowedArtists();
 
@@ -251,24 +253,17 @@ describe("SpotifyProvider.getPlaylistTracks", () => {
     // `item`. Asserted on the actual request URL, not just the mapped
     // output, because a test that only checks the output can pass against
     // a stale path if the fake response is shaped to match it regardless.
-    const fetchSpy = vi.fn(
-      async () => new Response(JSON.stringify(PLAYLIST_ITEMS_RESPONSE), { status: 200 }),
-    );
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
-    const provider = new SpotifyProvider("test-token");
+    const provider = await providerServing(PLAYLIST_ITEMS_RESPONSE);
 
     await provider.getPlaylistTracks("playlist-1");
 
-    const requestedUrl = (fetchSpy as ReturnType<typeof vi.fn>).mock.calls[0][0] as URL;
-    expect(requestedUrl.pathname).toBe("/v1/playlists/playlist-1/items");
-    expect(requestedUrl.pathname).not.toContain("/tracks");
+    const requestedPath = server?.requests[0].path;
+    expect(requestedPath).toBe("/playlists/playlist-1/items");
+    expect(requestedPath).not.toContain("/tracks");
   });
 
   test("maps the item field (not the deprecated track field) onto Track", async () => {
-    globalThis.fetch = vi.fn(
-      async () => new Response(JSON.stringify(PLAYLIST_ITEMS_RESPONSE), { status: 200 }),
-    ) as unknown as typeof fetch;
-    const provider = new SpotifyProvider("test-token");
+    const provider = await providerServing(PLAYLIST_ITEMS_RESPONSE);
 
     const page = await provider.getPlaylistTracks("playlist-1");
 
@@ -295,7 +290,7 @@ describe("SpotifyProvider.getPlaylistTracks", () => {
 
 describe("SpotifyProvider.search", () => {
   test("only requested types are present, others come back as empty pages", async () => {
-    globalThis.fetch = fakeSpotifyFetch({
+    const provider = await providerServing({
       tracks: {
         href: "",
         limit: 10,
@@ -306,7 +301,6 @@ describe("SpotifyProvider.search", () => {
         items: [],
       },
     });
-    const provider = new SpotifyProvider("test-token");
 
     const result = await provider.search("test query", { types: ["track"] });
 
@@ -317,16 +311,13 @@ describe("SpotifyProvider.search", () => {
   });
 
   test("the query reaches the request", async () => {
-    const fetchSpy = fakeSpotifyFetch({
+    const provider = await providerServing({
       tracks: { href: "", limit: 10, next: null, offset: 0, previous: null, total: 0, items: [] },
     });
-    globalThis.fetch = fetchSpy;
-    const provider = new SpotifyProvider("test-token");
 
     await provider.search("artist:Radiohead track:Karma Police");
 
-    const requestedUrl = (fetchSpy as ReturnType<typeof vi.fn>).mock.calls[0][0] as URL;
-    expect(requestedUrl.searchParams.get("q")).toBe("artist:Radiohead track:Karma Police");
+    expect(server?.requests[0].query.get("q")).toBe("artist:Radiohead track:Karma Police");
   });
 });
 
@@ -340,8 +331,7 @@ describe("SpotifyProvider.search", () => {
  */
 describe("SpotifyProvider unit conversion", () => {
   test("converts a track's duration_ms to seconds", async () => {
-    globalThis.fetch = fakeSpotifyFetch(SAVED_TRACKS_RESPONSE);
-    const provider = new SpotifyProvider("test-token");
+    const provider = await providerServing(SAVED_TRACKS_RESPONSE);
 
     const page = await provider.getLikedTracks();
 
@@ -351,7 +341,7 @@ describe("SpotifyProvider unit conversion", () => {
   });
 
   test("converts playback progress_ms to seconds", async () => {
-    globalThis.fetch = fakeSpotifyFetch({
+    const provider = await providerServing({
       is_playing: true,
       progress_ms: 45_000,
       item: {
@@ -364,7 +354,6 @@ describe("SpotifyProvider unit conversion", () => {
       },
       device: { id: "device-1", name: "Phone", type: "Smartphone", is_active: true, is_restricted: false, volume_percent: 50 },
     });
-    const provider = new SpotifyProvider("test-token");
 
     const nowPlaying = await provider.getCurrentlyPlaying();
 
@@ -372,12 +361,11 @@ describe("SpotifyProvider unit conversion", () => {
   });
 
   test("keeps a null progress null rather than converting it to zero", async () => {
-    globalThis.fetch = fakeSpotifyFetch({
+    const provider = await providerServing({
       is_playing: false,
       progress_ms: null,
       item: null,
     });
-    const provider = new SpotifyProvider("test-token");
 
     const nowPlaying = await provider.getCurrentlyPlaying();
 

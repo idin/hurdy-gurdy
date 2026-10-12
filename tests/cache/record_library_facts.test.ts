@@ -221,7 +221,7 @@ describe("end to end: reading a library produces real coverage", () => {
       },
     } as unknown as MediaProvider;
 
-    const cached = new CachedMediaProvider(provider, database, () => NOW);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW });
 
     await cached.getFollowedArtists();
     await cached.getLikedTracks();
@@ -241,7 +241,7 @@ describe("end to end: reading a library produces real coverage", () => {
       },
     } as unknown as MediaProvider;
 
-    const page = await new CachedMediaProvider(provider, database, () => NOW).getFollowedArtists();
+    const page = await new CachedMediaProvider(provider, { database, now: () => NOW }).getFollowedArtists();
 
     expect(page.items[0].likedTrackCount).toBe(0);
     expect(page.items[0].hasAnyLiked).toBe(false);
@@ -266,7 +266,7 @@ describe("end to end: reading a library produces real coverage", () => {
       },
     } as unknown as MediaProvider;
 
-    await new CachedMediaProvider(provider, database, () => NOW).getLikedTracks();
+    await new CachedMediaProvider(provider, { database, now: () => NOW }).getLikedTracks();
 
     const row = await database
       .prepare(
@@ -288,7 +288,7 @@ describe("queuing denominator work", () => {
       },
     } as unknown as MediaProvider;
 
-    await new CachedMediaProvider(provider, database, () => NOW).getFollowedArtists();
+    await new CachedMediaProvider(provider, { database, now: () => NOW }).getFollowedArtists();
 
     const { results } = await database
       .prepare(`SELECT kind, priority FROM resolution_queue ORDER BY kind`)
@@ -316,7 +316,7 @@ describe("queuing denominator work", () => {
       },
     } as unknown as MediaProvider;
 
-    await new CachedMediaProvider(provider, database, () => NOW).getFollowedArtists();
+    await new CachedMediaProvider(provider, { database, now: () => NOW }).getFollowedArtists();
 
     const row = await database
       .prepare(`SELECT COUNT(*) AS count FROM resolution_queue`)
@@ -340,7 +340,7 @@ describe("queuing denominator work", () => {
       },
     } as unknown as MediaProvider;
 
-    await new CachedMediaProvider(provider, database, () => NOW).getLikedTracks();
+    await new CachedMediaProvider(provider, { database, now: () => NOW }).getLikedTracks();
 
     const row = await database
       .prepare(

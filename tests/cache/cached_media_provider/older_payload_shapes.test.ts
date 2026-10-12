@@ -130,7 +130,7 @@ beforeEach(async () => {
 describe("liked tracks cached by older code", () => {
   test("a page from before durationSeconds reads without a D1 type error", async () => {
     await cacheLikedTracksPage({}, PAGE_BEFORE_SECONDS);
-    const cached = new CachedMediaProvider(buildCurrentProvider(), database, () => NOW);
+    const cached = new CachedMediaProvider(buildCurrentProvider(), { database, now: () => NOW });
 
     const page = await cached.getLikedTracks();
 
@@ -139,7 +139,7 @@ describe("liked tracks cached by older code", () => {
 
   test("a page from before ISRC reads without a D1 type error", async () => {
     await cacheLikedTracksPage({}, PAGE_BEFORE_ISRC);
-    const cached = new CachedMediaProvider(buildCurrentProvider(), database, () => NOW);
+    const cached = new CachedMediaProvider(buildCurrentProvider(), { database, now: () => NOW });
 
     const page = await cached.getLikedTracks();
 
@@ -148,7 +148,7 @@ describe("liked tracks cached by older code", () => {
 
   test("the same holds when a page size was asked for", async () => {
     await cacheLikedTracksPage({ limit: 50 }, PAGE_BEFORE_SECONDS);
-    const cached = new CachedMediaProvider(buildCurrentProvider(), database, () => NOW);
+    const cached = new CachedMediaProvider(buildCurrentProvider(), { database, now: () => NOW });
 
     const page = await cached.getLikedTracks({ limit: 50 });
 
@@ -157,7 +157,7 @@ describe("liked tracks cached by older code", () => {
 
   test("the library ends up holding the track, with its real duration", async () => {
     await cacheLikedTracksPage({}, PAGE_BEFORE_SECONDS);
-    const cached = new CachedMediaProvider(buildCurrentProvider(), database, () => NOW);
+    const cached = new CachedMediaProvider(buildCurrentProvider(), { database, now: () => NOW });
 
     await cached.getLikedTracks();
 
@@ -171,7 +171,7 @@ describe("liked tracks cached by older code", () => {
   test("playlist tracks cached by older code read too, since they share the shape", async () => {
     const playlistId = "37i9dQZF1DX4UtSsGT1Sbe";
     await cachePage("getPlaylistTracks", { playlistId }, PAGE_BEFORE_SECONDS);
-    const cached = new CachedMediaProvider(buildCurrentProvider(), database, () => NOW);
+    const cached = new CachedMediaProvider(buildCurrentProvider(), { database, now: () => NOW });
 
     const page = await cached.getPlaylistTracks(playlistId);
 
@@ -180,7 +180,7 @@ describe("liked tracks cached by older code", () => {
 
   test("an old entry costs one refetch, then the replacement is served from cache", async () => {
     await cacheLikedTracksPage({}, PAGE_BEFORE_SECONDS);
-    const cached = new CachedMediaProvider(buildCurrentProvider(), database, () => NOW);
+    const cached = new CachedMediaProvider(buildCurrentProvider(), { database, now: () => NOW });
 
     await cached.getLikedTracks();
     await cached.getLikedTracks();
@@ -197,7 +197,7 @@ describe("liked tracks cached by older code", () => {
       warnings.push(message);
     };
     await cacheLikedTracksPage({}, PAGE_BEFORE_SECONDS);
-    const cached = new CachedMediaProvider(buildCurrentProvider(), database, () => NOW, null, recordWarning);
+    const cached = new CachedMediaProvider(buildCurrentProvider(), { database, now: () => NOW, userId: null, writeWarning: recordWarning });
 
     await cached.getLikedTracks();
 

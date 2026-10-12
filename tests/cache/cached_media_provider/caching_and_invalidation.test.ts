@@ -141,7 +141,7 @@ describe("reading through the cache", () => {
   // for that method while every other test still passed.
   test("a repeated read of followed artists is served from cache", async () => {
     const { provider, calls } = countingProvider();
-    const cached = new CachedMediaProvider(provider, database, () => NOW);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW });
 
     await cached.getFollowedArtists();
     await cached.getFollowedArtists();
@@ -151,7 +151,7 @@ describe("reading through the cache", () => {
 
   test("a repeated read of saved albums is served from cache", async () => {
     const { provider, calls } = countingProvider();
-    const cached = new CachedMediaProvider(provider, database, () => NOW);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW });
 
     await cached.getSavedAlbums();
     await cached.getSavedAlbums();
@@ -179,7 +179,7 @@ describe("reading through the cache", () => {
         };
       },
     });
-    const cached = new CachedMediaProvider(provider, database, () => NOW);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW });
 
     await cached.getPlaylists();
     await cached.getPlaylists();
@@ -189,7 +189,7 @@ describe("reading through the cache", () => {
 
   test("a repeated read of playlist tracks is served from cache", async () => {
     const { provider, calls } = countingProvider();
-    const cached = new CachedMediaProvider(provider, database, () => NOW);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW });
 
     await cached.getPlaylistTracks("37i9dQZF1DX4UtSsGT1Sbe");
     await cached.getPlaylistTracks("37i9dQZF1DX4UtSsGT1Sbe");
@@ -199,7 +199,7 @@ describe("reading through the cache", () => {
 
   test("a repeated read does not reach the provider twice", async () => {
     const { provider, calls } = countingProvider();
-    const cached = new CachedMediaProvider(provider, database, () => NOW);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW });
 
     await cached.getLikedTracks();
     await cached.getLikedTracks();
@@ -209,7 +209,7 @@ describe("reading through the cache", () => {
 
   test("the cached answer is the same answer", async () => {
     const { provider } = countingProvider();
-    const cached = new CachedMediaProvider(provider, database, () => NOW);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW });
 
     const first = await cached.getLikedTracks();
     const second = await cached.getLikedTracks();
@@ -219,7 +219,7 @@ describe("reading through the cache", () => {
 
   test("different pages are cached separately", async () => {
     const { provider, calls } = countingProvider();
-    const cached = new CachedMediaProvider(provider, database, () => NOW);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW });
 
     await cached.getLikedTracks({ cursor: "0" });
     await cached.getLikedTracks({ cursor: "50" });
@@ -229,7 +229,7 @@ describe("reading through the cache", () => {
 
   test("different playlists are cached separately", async () => {
     const { provider, calls } = countingProvider();
-    const cached = new CachedMediaProvider(provider, database, () => NOW);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW });
 
     await cached.getPlaylistTracks("playlist-1");
     await cached.getPlaylistTracks("playlist-2");
@@ -245,7 +245,7 @@ describe("reading through the cache", () => {
         throw new Error("Spotify is down");
       },
     });
-    const cached = new CachedMediaProvider(provider, database, () => NOW);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW });
 
     await expect(cached.getPlaylists()).rejects.toThrow();
     await expect(cached.getPlaylists()).rejects.toThrow();
@@ -273,7 +273,7 @@ describe("coverage from the cache", () => {
       .run();
 
     const { provider } = countingProvider();
-    const page = await new CachedMediaProvider(provider, database, () => NOW).getFollowedArtists();
+    const page = await new CachedMediaProvider(provider, { database, now: () => NOW }).getFollowedArtists();
 
     expect(page.items[0].likedTrackCount).toBe(1);
     expect(page.items[0].hasAnyLiked).toBe(true);
@@ -283,7 +283,7 @@ describe("coverage from the cache", () => {
 
   test("an artist the cache has never seen keeps its zeros", async () => {
     const { provider } = countingProvider();
-    const page = await new CachedMediaProvider(provider, database, () => NOW).getFollowedArtists();
+    const page = await new CachedMediaProvider(provider, { database, now: () => NOW }).getFollowedArtists();
 
     expect(page.items[0].likedTrackCount).toBe(0);
     expect(page.items[0].hasAnyLiked).toBe(false);
@@ -299,7 +299,7 @@ describe("coverage from the cache", () => {
       .run();
 
     const { provider } = countingProvider();
-    const page = await new CachedMediaProvider(provider, database, () => NOW).getSavedAlbums();
+    const page = await new CachedMediaProvider(provider, { database, now: () => NOW }).getSavedAlbums();
 
     expect(page.items[0].totalTrackCount).toBe(6);
   });
@@ -310,7 +310,7 @@ describe("writes invalidate what they falsify", () => {
     // The failure this prevents: a user adds a track, reads the playlist, and
     // does not see it — with nothing to explain why.
     const { provider, calls } = countingProvider();
-    const cached = new CachedMediaProvider(provider, database, () => NOW);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW });
 
     await cached.getPlaylistTracks("playlist-1");
     await cached.addTracksToPlaylist("playlist-1", ["spotify:track:new"]);
@@ -321,7 +321,7 @@ describe("writes invalidate what they falsify", () => {
 
   test("removing from a playlist clears it too", async () => {
     const { provider, calls } = countingProvider();
-    const cached = new CachedMediaProvider(provider, database, () => NOW);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW });
 
     await cached.getPlaylistTracks("playlist-1");
     await cached.removeTracksFromPlaylist("playlist-1", ["spotify:track:t1"]);
@@ -334,7 +334,7 @@ describe("writes invalidate what they falsify", () => {
     // One call can save tracks, albums and shows together, so which listing
     // it falsified is not knowable without inspecting each URI.
     const { provider, calls } = countingProvider();
-    const cached = new CachedMediaProvider(provider, database, () => NOW);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW });
 
     await cached.getLikedTracks();
     await cached.getSavedAlbums();
@@ -348,7 +348,7 @@ describe("writes invalidate what they falsify", () => {
 
   test("removing from the library clears them as well", async () => {
     const { provider, calls } = countingProvider();
-    const cached = new CachedMediaProvider(provider, database, () => NOW);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW });
 
     await cached.getLikedTracks();
     await cached.removeFromLibrary(["spotify:track:t1"]);
@@ -361,7 +361,7 @@ describe("writes invalidate what they falsify", () => {
     // The near-miss in the other direction: over-invalidating turns every
     // write into a cold cache and quietly undoes the whole point.
     const { provider, calls } = countingProvider();
-    const cached = new CachedMediaProvider(provider, database, () => NOW);
+    const cached = new CachedMediaProvider(provider, { database, now: () => NOW });
 
     await cached.getLikedTracks();
     await cached.addTracksToPlaylist("playlist-1", ["spotify:track:new"]);
