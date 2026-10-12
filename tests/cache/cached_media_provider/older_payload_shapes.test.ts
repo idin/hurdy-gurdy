@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 
 import { buildCacheKey } from "../../../src/cache/cache_entry";
 import { CachedMediaProvider } from "../../../src/cache/cached_media_provider";
@@ -190,12 +190,14 @@ describe("liked tracks cached by older code", () => {
   });
 
   test("a rejected entry is logged with the field that failed", async () => {
+    // A real recording writer, handed to the provider: the logging is observed
+    // at the seam the provider exposes, with nothing replaced or spied on.
     const warnings: string[] = [];
-    const spy = vi.spyOn(console, "warn").mockImplementation((message: string) => {
+    const recordWarning = (message: string): void => {
       warnings.push(message);
-    });
+    };
     await cacheLikedTracksPage({}, PAGE_BEFORE_SECONDS);
-    const cached = new CachedMediaProvider(buildCurrentProvider(), database, () => NOW);
+    const cached = new CachedMediaProvider(buildCurrentProvider(), database, () => NOW, null, recordWarning);
 
     await cached.getLikedTracks();
 
@@ -207,10 +209,5 @@ describe("liked tracks cached by older code", () => {
         message: expect.any(String),
       },
     ]);
-    spy.mockRestore();
   });
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
 });
