@@ -8,7 +8,7 @@ exits 0 on `origin/main`.
 ## What actually happened
 
 `tsc -p tests/tsconfig.json` reports 6 errors and `npm run typecheck` exits non-zero.
-Observed on `origin/main` (commit 1371507, after `npm ci`), long types trimmed:
+Observed on `origin/main` as of commit 1371507 (the base of this branch; main has since moved to 051db16 and this log was reproduced again on the branch head, which differs only by this file), after `npm ci`, long types trimmed:
 
 ```
 tests/cache/views_survive_preparation.test.ts(21,22): error TS2339: Property 'MEDIA_CACHE' does not exist on type 'Env'.
@@ -24,7 +24,7 @@ tests/resolver/musicbrainz_resolution_routing.test.ts(105,58): error TS2345: (sa
 The task objects in `tests/resolver/musicbrainz_resolution_routing.test.ts` are built
 from the shared `TASK` constant, whose `priority: 1` (line 30) widens to `number`.
 It is then not assignable to `ResolutionTask`, whose `priority` is
-`ResolutionPriority` (`src/resolver/resolution_queue.ts:108`).
+`ResolutionPriority` (type at `src/resolver/resolution_queue.ts:108`, field at line 116).
 
 ### Group 2: two `MEDIA_CACHE does not exist on type 'Env'` errors
 
