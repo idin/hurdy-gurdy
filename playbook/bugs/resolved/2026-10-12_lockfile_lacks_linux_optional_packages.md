@@ -25,3 +25,18 @@ check	Run npm ci	2026-10-12T11:19:10.0721965Z npm error Missing: @rolldown/bindi
 
 Regenerate the lockfile so every platform's optional entries are present,
 with no change to any resolved version.
+
+## Fix (appended 2026-10-12)
+
+Commit d6137ab added the missing optional platform entries to
+`package-lock.json` at the versions their parents already pin. Parsed
+before/after: 0 entries changed, 0 removed, 108 added (all `optional`);
+`npm ci --dry-run` reports no "Missing". The lockfile carries no `resolved`
+or `integrity` fields anywhere, so the added entries match.
+
+Green: CI run 38243104633 (head 3612e06), job `check` passed: `npm ci`,
+typecheck, and vitest (worker and repository) all ran.
+
+A second failure sat behind this one: `wrangler.example.jsonc` had no
+`d1_databases` entry, so `MEDIA_CACHE` was undefined in CI and 13 test files
+failed (run 38242840246). Fixed in 3612e06.
