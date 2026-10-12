@@ -405,7 +405,7 @@ useful thing is now a network call rather than a 75 GB download.
 
    | Cause | Fix |
    | --- | --- |
-   | The resolver alarm could not authenticate, so 1,979 queued tasks were never attempted | `docs/bugs/resolved/2026-09-18_resolver_alarm_cannot_authenticate_without_a_connection.md` |
+   | The resolver alarm could not authenticate, so 1,979 queued tasks were never attempted | `playbook/bugs/resolved/2026-09-18_resolver_alarm_cannot_authenticate_without_a_connection.md` |
    | The resolver called MusicBrainz directly at 1 req/sec, not ListenBrainz at 30 per 9s | `resolve_artist_totals.ts` now maps through ListenBrainz and calls MusicBrainz only for the work relation |
    | `searchRecording` compared seconds against milliseconds, so no search could ever match | Same bug log |
 
