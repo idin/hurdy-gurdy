@@ -55,3 +55,20 @@ AssertionError: expected [ Array(1) ] to deeply equal []
  FAIL  |worker| ... > does not merge two local albums into one fake album
 AssertionError: expected [ { uri: 'spotify:album:null', … } ] to deeply equal []
 ```
+
+
+## Fixed and verified, 2026-10-12
+
+`SpotifyTrack` ids are `string | null`; `toTrack` keeps only artists with an
+id in `Track.artists`, keeps every name in `artistNames`, and gives a null
+`albumUri` to an album with no id. Green after the fix, the same two tests
+that were red:
+
+```
+ ✓ |worker| tests/cache/cached_media_provider/local_files.test.ts (4 tests)
+ Test Files  39 passed (39)
+      Tests  364 passed (364)
+```
+
+`npm run typecheck` reports the six errors that were already in `tests/` and
+none new.

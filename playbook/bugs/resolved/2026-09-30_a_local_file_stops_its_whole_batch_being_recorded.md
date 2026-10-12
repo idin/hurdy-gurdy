@@ -45,3 +45,16 @@ of catching the failure afterwards.
  FAIL  |worker| tests/cache/cached_media_provider/local_files.test.ts > a playlist holding local files > still records the catalogue track that shares its page
 AssertionError: expected null to deeply equal { name: 'Money' }
 ```
+
+
+## Fixed and verified, 2026-10-12
+
+`recordTracks` and `recordPlaylistTracks` now skip tracks whose id is null
+(`findCatalogueTracks` in `src/cache/record_library_facts.ts`); playlist
+positions stay the playlist's own. Green after the fix:
+
+```
+ ✓ |worker| tests/cache/cached_media_provider/local_files.test.ts (4 tests)
+ Test Files  39 passed (39)
+      Tests  364 passed (364)
+```
