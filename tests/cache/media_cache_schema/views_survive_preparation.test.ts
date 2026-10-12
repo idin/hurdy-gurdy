@@ -10,7 +10,7 @@
  * every unit test passed, because no test had ever asked whether the views
  * were still there afterwards.
  *
- * See `docs/bugs/resolved/2026-09-18_a_drop_view_migration_destroys_the_view_on_every_startup.md`.
+ * See `playbook/bugs/resolved/2026-09-18_a_drop_view_migration_destroys_the_view_on_every_startup.md`.
  */
 
 import { env } from "cloudflare:test";

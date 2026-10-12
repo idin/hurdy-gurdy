@@ -93,7 +93,7 @@ describe("SpotifyProvider.getPlaylists", () => {
     // Regression: every call failed with "Cannot read properties of
     // undefined (reading 'total')" because toPlaylist read
     // playlist.tracks.total unguarded. See
-    // docs/bugs/unresolved/2026-09-13_get_playlists_crashes_when_spotify_omits_the_tracks_summary.md
+    // playbook/bugs/resolved/2026-09-13_get_playlists_crashes_when_spotify_omits_the_tracks_summary.md
     globalThis.fetch = fakeSpotifyFetch(PLAYLISTS_RESPONSE_WITHOUT_TRACK_SUMMARY);
     const provider = new SpotifyProvider("test-token");
 
