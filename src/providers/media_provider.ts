@@ -80,18 +80,35 @@ type LibraryCoverage = {
 };
 
 export type Track = LibraryMembership & {
-  id: string;
+  /**
+   * The provider's id, or null for a track with no catalogue identity.
+   *
+   * Null for a local file: a playlist can hold the user's own files, and
+   * Spotify sends those with `"id": null` (their Playlists concept page).
+   * Typing this as always-present is what let three bugs through on
+   * 2026-09-30 — see `docs/bugs/resolved/2026-09-30_*local_file*`.
+   */
+  id: string | null;
   name: string;
   /**
-   * The track's artists, in the provider's own order.
+   * The track's artists that have an identity, in the provider's own order.
    *
    * Carries the URI as well as the name because a name is not an identity:
    * two artists share one, one artist appears under several, and matching by
    * name silently drops links for anyone not already recorded. The provider
    * sends the identity, so it is kept rather than discarded on the way past.
+   *
+   * An artist the provider gives no id — every artist on a local file — is
+   * left out rather than given a made-up URI, which is how every local artist
+   * once merged into one `spotify:artist:null`.
    */
   artists: { uri: string; name: string }[];
-  /** Display names, in the same order as `artists`. */
+  /**
+   * Every credited artist's display name, identified or not.
+   *
+   * Not paired with `artists` by position: a local file's artists are named
+   * here and absent there.
+   */
   artistNames: string[];
   albumName: string | null;
   /** The album this track belongs to, when the provider said. */
@@ -107,7 +124,7 @@ export type Track = LibraryMembership & {
    * The track's length in **seconds**, fractional.
    *
    * Seconds throughout this codebase, converted once where a provider's
-   * response is mapped. Spotify sends `duration_seconds` and that field keeps its
+   * response is mapped. Spotify sends `duration_ms` and that field keeps its
    * name in the API types, because it is Spotify's field and renaming it
    * would make their response harder to check against their documentation.
    * Everything downstream of the mapper is seconds.
