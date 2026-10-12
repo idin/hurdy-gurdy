@@ -22,6 +22,8 @@ type StoredSession = {
   refreshToken: string;
   accessToken: string;
   expiresAt: number;
+  /** Absent in sessions stored before scopes were kept; read as unknown. */
+  grantedScopes?: string[] | null;
 };
 
 function kvKey(spotifyUserId: string): string {
@@ -44,6 +46,7 @@ export async function storeSession(
     refreshToken: tokens.refreshToken,
     accessToken: tokens.accessToken,
     expiresAt: tokens.expiresAt,
+    grantedScopes: tokens.grantedScopes ?? null,
   };
   await kv.put(kvKey(spotifyUserId), JSON.stringify(stored));
 }
@@ -60,8 +63,46 @@ export class NoSpotifySessionError extends Error {
 }
 
 /**
- * Get a usable access token for a user, refreshing and re-storing it first
- * if the stored one is expired or close to it.
+ * Get a usable access token and its granted scopes, refreshing and
+ * re-storing first if the stored token is expired or close to it.
+ *
+ * @param kv - The `SPOTIFY_TOKENS` namespace.
+ * @param spotifyUserId - Whose session to use.
+ * @param options.clientId - This app's Spotify client ID, needed to refresh.
+ * @param options.now - Clock, injected for testability.
+ * @returns A valid access token, and the scopes it was granted (null when
+ *   the session was stored before scopes were kept and none has been seen since).
+ * @throws NoSpotifySessionError - When the user has never authorized.
+ */
+export async function getSessionTokens(
+  kv: KVNamespace,
+  spotifyUserId: string,
+  options: { clientId: string; now: () => number },
+): Promise<{ accessToken: string; grantedScopes: string[] | null }> {
+  const raw = await kv.get(kvKey(spotifyUserId));
+  if (!raw) {
+    throw new NoSpotifySessionError(spotifyUserId);
+  }
+  const stored = JSON.parse(raw) as StoredSession;
+  const storedScopes = stored.grantedScopes ?? null;
+
+  if (options.now() < stored.expiresAt - REFRESH_MARGIN_MILLISECONDS) {
+    return { accessToken: stored.accessToken, grantedScopes: storedScopes };
+  }
+
+  const refreshed = await refreshAccessToken({
+    clientId: options.clientId,
+    refreshToken: stored.refreshToken,
+    now: options.now,
+  });
+  // A refresh response may omit `scope`; the grant is unchanged then.
+  const grantedScopes = refreshed.grantedScopes ?? storedScopes;
+  await storeSession(kv, spotifyUserId, { ...refreshed, grantedScopes });
+  return { accessToken: refreshed.accessToken, grantedScopes };
+}
+
+/**
+ * Get a usable access token for a user (see `getSessionTokens`).
  *
  * @param kv - The `SPOTIFY_TOKENS` namespace.
  * @param spotifyUserId - Whose session to use.
@@ -75,21 +116,5 @@ export async function getAccessToken(
   spotifyUserId: string,
   options: { clientId: string; now: () => number },
 ): Promise<string> {
-  const raw = await kv.get(kvKey(spotifyUserId));
-  if (!raw) {
-    throw new NoSpotifySessionError(spotifyUserId);
-  }
-  const stored = JSON.parse(raw) as StoredSession;
-
-  if (options.now() < stored.expiresAt - REFRESH_MARGIN_MILLISECONDS) {
-    return stored.accessToken;
-  }
-
-  const refreshed = await refreshAccessToken({
-    clientId: options.clientId,
-    refreshToken: stored.refreshToken,
-    now: options.now,
-  });
-  await storeSession(kv, spotifyUserId, refreshed);
-  return refreshed.accessToken;
+  return (await getSessionTokens(kv, spotifyUserId, options)).accessToken;
 }

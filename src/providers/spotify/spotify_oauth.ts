@@ -101,7 +101,14 @@ export type SpotifyTokens = {
   refreshToken: string;
   /** Epoch milliseconds. Derived from `expires_in` at the moment of the call. */
   expiresAt: number;
+  /** Scopes Spotify granted, from the token response; null or absent when none is known. */
+  grantedScopes?: string[] | null;
 };
+
+/** Spotify's token response lists granted scopes as one space-separated string. */
+function parseGrantedScopes(scope: string | undefined): string[] | null {
+  return scope === undefined ? null : scope.split(" ").filter((entry) => entry.length > 0);
+}
 
 /**
  * Exchange an authorization code for tokens.
@@ -139,12 +146,14 @@ export async function exchangeCodeForTokens(options: {
     access_token: string;
     refresh_token: string;
     expires_in: number;
+    scope?: string;
   };
 
   return {
     accessToken: body.access_token,
     refreshToken: body.refresh_token,
     expiresAt: options.now() + body.expires_in * 1000,
+    grantedScopes: parseGrantedScopes(body.scope),
   };
 }
 
@@ -183,6 +192,7 @@ export async function refreshAccessToken(options: {
     access_token: string;
     refresh_token?: string;
     expires_in: number;
+    scope?: string;
   };
 
   return {
@@ -191,6 +201,7 @@ export async function refreshAccessToken(options: {
     // in every response, and when absent the existing one is still valid.
     refreshToken: body.refresh_token ?? options.refreshToken,
     expiresAt: options.now() + body.expires_in * 1000,
+    grantedScopes: parseGrantedScopes(body.scope),
   };
 }
 

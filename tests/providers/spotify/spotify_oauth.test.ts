@@ -1,10 +1,12 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   buildAuthorizeUrl,
   deriveCodeChallenge,
+  exchangeCodeForTokens,
   generateCodeVerifier,
   needsRefresh,
+  refreshAccessToken,
   SPOTIFY_SCOPES,
 } from "../../../src/providers/spotify/spotify_oauth";
 
@@ -102,5 +104,60 @@ describe("needsRefresh", () => {
     expect(
       needsRefresh(tokens, { now: () => 1_000_001, marginMilliseconds: 60_000 }),
     ).toBe(true);
+  });
+});
+
+const originalFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
+
+/** Stands in for Spotify's token endpoint only; the OAuth code above it is real. */
+function answerTokenRequestWith(body: Record<string, unknown>): void {
+  globalThis.fetch = vi.fn(
+    async () => new Response(JSON.stringify(body), { status: 200 }),
+  ) as unknown as typeof fetch;
+}
+
+const EXCHANGE_PARAMETERS = {
+  clientId: "client",
+  redirectUri: "https://example.workers.dev/callback",
+  code: "code",
+  codeVerifier: "verifier",
+  now: () => 0,
+};
+
+describe("granted scopes in token responses", () => {
+  test("exchangeCodeForTokens returns the scopes Spotify granted", async () => {
+    answerTokenRequestWith({
+      access_token: "a",
+      refresh_token: "r",
+      expires_in: 3600,
+      scope: "playlist-modify-private playlist-modify-public",
+    });
+
+    const tokens = await exchangeCodeForTokens(EXCHANGE_PARAMETERS);
+
+    expect(tokens.grantedScopes).toEqual(["playlist-modify-private", "playlist-modify-public"]);
+  });
+
+  test("exchangeCodeForTokens reports unknown scopes as null when the response has no scope", async () => {
+    answerTokenRequestWith({ access_token: "a", refresh_token: "r", expires_in: 3600 });
+
+    const tokens = await exchangeCodeForTokens(EXCHANGE_PARAMETERS);
+
+    expect(tokens.grantedScopes).toBeNull();
+  });
+
+  test("refreshAccessToken returns the scopes from the refresh response", async () => {
+    answerTokenRequestWith({ access_token: "a2", expires_in: 3600, scope: "user-library-read" });
+
+    const tokens = await refreshAccessToken({
+      clientId: "client",
+      refreshToken: "r",
+      now: () => 0,
+    });
+
+    expect(tokens.grantedScopes).toEqual(["user-library-read"]);
   });
 });

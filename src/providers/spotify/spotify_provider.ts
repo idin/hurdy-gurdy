@@ -166,8 +166,13 @@ export class SpotifyProvider implements MediaProvider {
   readonly name = "spotify";
   private readonly client: SpotifyApiClient;
 
-  constructor(accessToken: string) {
-    this.client = new SpotifyApiClient(accessToken);
+  /**
+   * @param accessToken - The user's Spotify access token.
+   * @param options.grantedScopes - Scopes Spotify granted with the token, for
+   *   explaining a refused write; omitted when the session stored none.
+   */
+  constructor(accessToken: string, options: { grantedScopes?: string[] } = {}) {
+    this.client = new SpotifyApiClient(accessToken, { grantedScopes: options.grantedScopes ?? null });
   }
 
   async search(
@@ -267,8 +272,7 @@ export class SpotifyProvider implements MediaProvider {
     description?: string;
     isPublic?: boolean;
   }): Promise<Playlist> {
-    const profile = await this.client.getCurrentUser();
-    const created = await this.client.createPlaylist(profile.id, {
+    const created = await this.client.createPlaylist({
       name: details.name,
       description: details.description,
       public: details.isPublic,

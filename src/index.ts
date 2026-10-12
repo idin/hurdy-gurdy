@@ -41,7 +41,7 @@ import {
   LIBRARY_WRITE_MAX_ITEMS,
   PLAYLIST_ADD_MAX_ITEMS,
 } from "./providers/spotify/spotify_api_client";
-import { getAccessToken } from "./providers/spotify/spotify_session";
+import { getAccessToken, getSessionTokens } from "./providers/spotify/spotify_session";
 import type { MediaProvider, SearchType } from "./providers/media_provider";
 import {
   buildFailure,
@@ -125,11 +125,12 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
     if (!this.props?.spotifyUserId) {
       throw new Error("Not authenticated with Spotify.");
     }
-    const accessToken = await getAccessToken(this.env.SPOTIFY_TOKENS, this.props.spotifyUserId, {
-      clientId: this.env.SPOTIFY_CLIENT_ID,
-      now: () => Date.now(),
-    });
-    const spotify = new SpotifyProvider(accessToken);
+    const { accessToken, grantedScopes } = await getSessionTokens(
+      this.env.SPOTIFY_TOKENS,
+      this.props.spotifyUserId,
+      { clientId: this.env.SPOTIFY_CLIENT_ID, now: () => Date.now() },
+    );
+    const spotify = new SpotifyProvider(accessToken, { grantedScopes: grantedScopes ?? undefined });
     if (this.env.MEDIA_CACHE === undefined) {
       return spotify;
     }
