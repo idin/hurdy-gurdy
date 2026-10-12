@@ -18,7 +18,7 @@
  * something they asked for against something they did not.
  */
 
-import { buildSongKey, buildWorkKey } from "../catalogue/normalise_release_title";
+import { buildSongKey, buildWorkKey, normaliseReleaseTitle } from "../catalogue/normalise_release_title";
 import type { Album, Artist, Page, Playlist, Track } from "../providers/media_provider";
 
 /**
@@ -82,8 +82,8 @@ export async function recordTracks(
     statements.push(
       database
         .prepare(
-          `INSERT INTO track (uri, id, name, album_uri, duration_seconds, is_liked, song_key, isrc, cached_at)
-             VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)
+          `INSERT INTO track (uri, id, name, album_uri, duration_seconds, is_liked, song_key, normalised_title, isrc, cached_at)
+             VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(uri) DO UPDATE SET
              name = excluded.name,
              duration_seconds = excluded.duration_seconds,
@@ -95,6 +95,7 @@ export async function recordTracks(
              -- built from an API read.
              duration_seconds = COALESCE(excluded.duration_seconds, track.duration_seconds),
              song_key = COALESCE(excluded.song_key, track.song_key),
+             normalised_title = excluded.normalised_title,
              isrc = COALESCE(excluded.isrc, track.isrc),
              cached_at = excluded.cached_at`,
         )
@@ -114,6 +115,7 @@ export async function recordTracks(
                 artistUris: track.artists.map((artist) => artist.uri),
               })
             : null,
+          normaliseReleaseTitle(track.name),
           track.isrc,
           options.now,
         ),

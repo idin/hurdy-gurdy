@@ -35,6 +35,7 @@
  */
 
 import { DEFAULT_LENGTH_WEIGHT_EXPONENT } from "../metrics/duration_weighted_completion";
+import { SAME_SONG_DURATION_TOLERANCE_SECONDS } from "../catalogue/normalise_release_title";
 
 /**
  * Every statement needed to bring an empty database up to the current shape.
@@ -85,6 +86,10 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
      -- opening with a radio and car engines and a short one that is just the
      -- music — two different tracks, and merging them would lose that.
      song_key     TEXT,
+     -- The title with master and edition markers removed. With duration_seconds
+     -- it recognises a remaster as the same song for an artist's count, which
+     -- song_key cannot: a remaster has its own ISRC, hence its own song_key.
+     normalised_title TEXT,
      -- The recording's ISRC. Identifies a recording ACROSS services, so it is
      -- the hop from a Spotify id to a MusicBrainz id and the spine the
      -- permanent catalogue will be keyed on. Arrives free on every /me/tracks
@@ -317,19 +322,62 @@ export const MEDIA_CACHE_SCHEMA: readonly string[] = [
      GROUP BY album.uri, album.total_tracks`,
 
   /*
-   * Artist coverage: liked tracks, and how many distinct albums they span.
+   * The liked songs of each artist, one row per song.
    *
-   * The album count is the second axis Idin asked for: forty liked tracks
-   * from one album is a different relationship to an artist than one track
-   * from each of forty albums, and a track count alone cannot tell them
-   * apart.
+   * A liked track is a duplicate when the same artist has another liked track
+   * with the same normalised title within the duration tolerance that sorts
+   * before it (shorter, then lower uri, so exactly one of a group survives).
+   * Compared by distance rather than by a rounded bucket: "Under Pressure"
+   * at 248.4s and 246.9s straddle a bucket edge but are 1.5s apart.
+   *
+   * The artist comes from the join, never from the title, so two artists'
+   * "Windmills of Your Mind" never meet. A track without a known (positive) duration
+   * to compare is its own song, since merging on a missing value would group
+   * every such track together.
+   */
+  `DROP VIEW IF EXISTS artist_liked_song`,
+  `CREATE VIEW artist_liked_song AS
+     SELECT
+       track_artist.artist_uri AS artist_uri,
+       track.uri               AS track_uri
+     FROM track_artist
+     JOIN track ON track.uri = track_artist.track_uri
+     WHERE track.is_liked = 1
+       AND NOT EXISTS (
+         SELECT 1
+           FROM track_artist AS other_link
+           JOIN track AS other ON other.uri = other_link.track_uri
+          WHERE other_link.artist_uri = track_artist.artist_uri
+            AND other.is_liked = 1
+            AND other.uri <> track.uri
+            AND other.normalised_title = track.normalised_title
+            -- 0 is the placeholder recordTracks stores for an unknown length,
+            -- so it is as unknown as NULL; two unknowns are not 0 seconds apart.
+            AND other.duration_seconds > 0
+            AND track.duration_seconds > 0
+            AND ABS(other.duration_seconds - track.duration_seconds)
+                  <= ${SAME_SONG_DURATION_TOLERANCE_SECONDS}
+            AND (other.duration_seconds < track.duration_seconds
+                 OR (other.duration_seconds = track.duration_seconds
+                     AND other.uri < track.uri))
+       )`,
+
+  /*
+   * Artist coverage: liked songs, and how many distinct albums they span.
+   *
+   * A song counts once per artist however many pressings are liked
+   * (Idin, 2026-09-26); see `artist_liked_song`. The album count is the
+   * second axis Idin asked for: forty liked tracks from one album is a
+   * different relationship to an artist than one track from each of forty
+   * albums, and a track count alone cannot tell them apart.
    */
   `DROP VIEW IF EXISTS artist_coverage`,
   `CREATE VIEW artist_coverage AS
      SELECT
        artist.uri                                     AS artist_uri,
-       COUNT(DISTINCT CASE WHEN track.is_liked = 1
-                           THEN track.uri END)        AS liked_track_count,
+       (SELECT COUNT(*) FROM artist_liked_song
+         WHERE artist_liked_song.artist_uri = artist.uri)
+                                                      AS liked_track_count,
        artist.total_track_count                       AS total_track_count,
        COUNT(DISTINCT CASE WHEN track.is_liked = 1
                            THEN track.album_uri END)  AS albums_with_liked_tracks,
