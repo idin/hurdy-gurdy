@@ -33,16 +33,17 @@ Locations: `tests/cache/views_survive_preparation.test.ts(21,22)` and
 `src/types.ts:10` declares `MEDIA_CACHE?: D1Database`, but the `Env` the tests see
 is the global one generated into the gitignored `worker-configuration.d.ts`.
 
-Checked: I generated that file in the fresh worktree
-(`npx wrangler types -c wrangler.example.jsonc`; plain `npx wrangler types` fails
-with "No config file detected" because the real `wrangler.jsonc` is gitignored) and
-re-ran `tsc --noEmit -p tests/tsconfig.json`. **The two errors did not vanish**: all
-6 remain. So a missing generated file is not the whole explanation. What I found:
-`wrangler.example.jsonc` declares only the `OAUTH_KV` and `SPOTIFY_TOKENS` bindings and
-no D1 binding, so the generated `Env` has no `MEDIA_CACHE`. Whether the owner's real
-`wrangler.jsonc` (not in git) declares it, and so whether the errors appear there
-too, I did not check. Likely fix, not verified: add the D1 `MEDIA_CACHE` binding to
-`wrangler.example.jsonc`, or type the tests' `env` from `src/types.ts`.
+Checked, twice. (1) With the example config (`npx wrangler types -c wrangler.example.jsonc`,
+since plain `npx wrangler types` needs the gitignored `wrangler.jsonc`): all 6 errors
+remain; the example declares no D1 binding. (2) With a read-only copy of the owner's real
+`wrangler.jsonc` (which declares the `MEDIA_CACHE` D1 binding) and plain `npx wrangler types`:
+the generated `worker-configuration.d.ts` does contain `MEDIA_CACHE: D1Database`, yet
+`tsc --noEmit -p tests/tsconfig.json` still reports all 6 errors. **So regenerating
+the types does not make the 2 errors vanish.** `tests/tsconfig.json` has
+`include: ["**/*.ts"]` relative to `tests/`, so the root-level generated file is not part
+of the tests project; the `Env` the tests see lacks the binding. Likely fix, not
+verified: include the generated file in the tests project, or type the tests' `env`
+from `src/types.ts`.
 
 ## Scenario that triggers it
 
