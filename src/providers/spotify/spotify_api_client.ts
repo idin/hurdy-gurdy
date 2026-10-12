@@ -7,7 +7,8 @@
  * read and tested on their own.
  */
 
-const SPOTIFY_API_BASE = "https://api.spotify.com/v1";
+/** Spotify's real Web API; `apiBaseUrl` replaces it only so tests can aim at a local server. */
+const DEFAULT_SPOTIFY_API_BASE_URL = "https://api.spotify.com/v1";
 
 /**
  * Divisor between Spotify's wire unit and this codebase's.
@@ -234,20 +235,26 @@ export function isNoActiveDevice(error: unknown): boolean {
 export class SpotifyApiClient {
   private readonly accessToken: string;
   private readonly grantedScopes: string[] | null;
+  private readonly apiBaseUrl: string;
 
   /**
    * @param accessToken - The user's Spotify access token.
    * @param options.grantedScopes - Scopes Spotify granted with the token, or
    *   null when the session predates storing them. Only used to explain a
    *   refused write.
+   * @param options.apiBaseUrl - Replaces Spotify's Web API base URL; for tests.
    */
-  constructor(accessToken: string, options: { grantedScopes: string[] | null } = { grantedScopes: null }) {
+  constructor(
+    accessToken: string,
+    options: { grantedScopes: string[] | null; apiBaseUrl?: string } = { grantedScopes: null },
+  ) {
     this.accessToken = accessToken;
     this.grantedScopes = options.grantedScopes;
+    this.apiBaseUrl = options.apiBaseUrl ?? DEFAULT_SPOTIFY_API_BASE_URL;
   }
 
   private async get<Result>(path: string, parameters: Record<string, string | number | undefined>): Promise<Result> {
-    const url = new URL(`${SPOTIFY_API_BASE}${path}`);
+    const url = new URL(`${this.apiBaseUrl}${path}`);
     for (const [key, value] of Object.entries(parameters)) {
       if (value !== undefined) {
         url.searchParams.set(key, String(value));
@@ -293,7 +300,7 @@ export class SpotifyApiClient {
       parameters?: Record<string, string | number | undefined>;
     } = {},
   ): Promise<Result | null> {
-    const url = new URL(`${SPOTIFY_API_BASE}${path}`);
+    const url = new URL(`${this.apiBaseUrl}${path}`);
     for (const [key, value] of Object.entries(options.parameters ?? {})) {
       if (value !== undefined) {
         url.searchParams.set(key, String(value));

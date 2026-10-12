@@ -24,7 +24,20 @@ export default defineConfig({
         test: {
           name: "worker",
           include: ["tests/**/*.test.ts"],
-          exclude: ["tests/**/*.source.test.ts", "tests/secret_hygiene.test.ts"],
+          exclude: [
+            "tests/**/*.source.test.ts",
+            "tests/**/*.network.test.ts",
+            "tests/secret_hygiene.test.ts",
+          ],
+        },
+      },
+      {
+        // Tests that need `node:http` (a real local Spotify server) or Miniflare,
+        // neither of which workerd provides.
+        test: {
+          name: "network",
+          environment: "node",
+          include: ["tests/**/*.network.test.ts"],
         },
       },
       {

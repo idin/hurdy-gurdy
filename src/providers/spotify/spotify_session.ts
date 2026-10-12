@@ -70,6 +70,7 @@ export class NoSpotifySessionError extends Error {
  * @param spotifyUserId - Whose session to use.
  * @param options.clientId - This app's Spotify client ID, needed to refresh.
  * @param options.now - Clock, injected for testability.
+ * @param options.tokenUrl - Replaces Spotify's token endpoint; for tests.
  * @returns A valid access token, and the scopes it was granted (null when
  *   the session was stored before scopes were kept and none has been seen since).
  * @throws NoSpotifySessionError - When the user has never authorized.
@@ -77,7 +78,7 @@ export class NoSpotifySessionError extends Error {
 export async function getSessionTokens(
   kv: KVNamespace,
   spotifyUserId: string,
-  options: { clientId: string; now: () => number },
+  options: { clientId: string; now: () => number; tokenUrl?: string },
 ): Promise<{ accessToken: string; grantedScopes: string[] | null }> {
   const raw = await kv.get(kvKey(spotifyUserId));
   if (!raw) {
@@ -94,6 +95,7 @@ export async function getSessionTokens(
     clientId: options.clientId,
     refreshToken: stored.refreshToken,
     now: options.now,
+    tokenUrl: options.tokenUrl,
   });
   // A refresh response may omit `scope`; the grant is unchanged then.
   const grantedScopes = refreshed.grantedScopes ?? storedScopes;
@@ -108,13 +110,14 @@ export async function getSessionTokens(
  * @param spotifyUserId - Whose session to use.
  * @param options.clientId - This app's Spotify client ID, needed to refresh.
  * @param options.now - Clock, injected for testability.
+ * @param options.tokenUrl - Replaces Spotify's token endpoint; for tests.
  * @returns A valid access token.
  * @throws NoSpotifySessionError - When the user has never authorized.
  */
 export async function getAccessToken(
   kv: KVNamespace,
   spotifyUserId: string,
-  options: { clientId: string; now: () => number },
+  options: { clientId: string; now: () => number; tokenUrl?: string },
 ): Promise<string> {
   return (await getSessionTokens(kv, spotifyUserId, options)).accessToken;
 }

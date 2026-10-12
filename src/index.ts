@@ -137,12 +137,11 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
     // The Spotify user id is the budget key. On a single-user deployment
     // there is nobody to bill, but keying it anyway means opening the server
     // to others is a configuration change rather than a code change.
-    return new CachedMediaProvider(
-      spotify,
-      this.env.MEDIA_CACHE,
-      () => Date.now(),
-      this.props.spotifyUserId,
-    );
+    return new CachedMediaProvider(spotify, {
+      database: this.env.MEDIA_CACHE,
+      now: () => Date.now(),
+      userId: this.props.spotifyUserId,
+    });
   }
 
   /**
@@ -298,7 +297,7 @@ export class HurdyGurdyMCP extends McpAgent<Env, unknown, UserProps> {
         const provider =
           accessToken === null
             ? undefined
-            : new CachedMediaProvider(new SpotifyProvider(accessToken), database);
+            : new CachedMediaProvider(new SpotifyProvider(accessToken), { database });
 
         await runResolutionTask(
           database,
