@@ -67,3 +67,19 @@ tests/cache/cached_payload_schemas.test.ts(5,3): error TS2305: Module '"../../sr
 The four new per-method tests in `caching_and_invalidation.test.ts` (followed
 artists, saved albums, playlists, playlist tracks served from cache) pass
 already: they guard each method's schema against wrongly refusing valid pages.
+
+
+## Fixed and verified, 2026-10-12
+
+`Track.id`, `SpotifyTrack.id` and `TRACK_SCHEMA.id` are `string | null` (the
+first two in the local-files pull request, the schema in the cached-page one).
+`SCHEMAS_MATCH_TYPES` and `TypeEquality` in `src/cache/cached_payload_schemas.ts`
+now fail `npm run typecheck` if any schema and its type disagree. The drift
+guard tests are green:
+
+```
+ Test Files  41 passed (41)
+      Tests  387 passed (387)
+```
+
+`npm run typecheck` reports the six errors already in `tests/` and none new.
