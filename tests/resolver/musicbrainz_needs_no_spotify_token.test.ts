@@ -10,7 +10,7 @@
  *
  * 1,979 tasks sat queued for four days with `attempts = 0` because of it, and
  * only 38 of 4,624 tracks ever got a recording MBID. See
- * `docs/bugs/resolved/2026-09-18_resolver_alarm_cannot_authenticate_without_a_connection.md`.
+ * `playbook/bugs/resolved/2026-09-18_resolver_alarm_cannot_authenticate_without_a_connection.md`.
  */
 
 import { describe, expect, test } from "vitest";

@@ -8,7 +8,7 @@
  * 300 ms. That single row turned a 23-minute bulk pass into a 24-hour one, and
  * left no error until it finally gave out.
  *
- * See `docs/bugs/resolved/2026-09-19_a_request_with_no_timeout_hung_for_seventeen_minutes.md`.
+ * See `playbook/bugs/resolved/2026-09-19_a_request_with_no_timeout_hung_for_seventeen_minutes.md`.
  *
  * These tests assert the *signal is passed*, not that a real timeout elapses.
  * Waiting out a ten-second bound in a unit test would make the suite slow for
