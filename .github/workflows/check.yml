@@ -1,0 +1,35 @@
+# Why this exists: nothing else runs `npm run typecheck` (which also compiles
+# the SCHEMAS_MATCH_TYPES drift guard) or the tests, so a type error or a
+# broken test could reach main unseen.
+#
+# It needs no secrets: the integration project, which needs a real Spotify
+# account, is deliberately not run.
+name: check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      # actions are pinned to the commit of a release tag (checkout v7.0.1, setup-node v7.1.0)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      # package.json has no engines field and there is no .nvmrc; 24 is the
+      # version the project is developed on.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # wrangler.jsonc is gitignored (it holds one account's ids); the example
+      # carries placeholder ids, which is all the local workerd test pool needs.
+      # The Env type is hand-written in src/types.ts, so `wrangler types` is not needed.
+      - run: cp wrangler.example.jsonc wrangler.jsonc
+      - run: npm run typecheck
+      - run: npx vitest run --project worker --project repository
