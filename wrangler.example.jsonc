@@ -24,6 +24,18 @@
     ]
   },
 
+  "d1_databases": [
+    {
+      // Named for what it holds, not for the worker — the worker is already
+      // called hurdy-gurdy, and a binding repeating that says nothing.
+      "binding": "MEDIA_CACHE",
+      "database_name": "hurdy-gurdy",
+      // From `npx wrangler d1 create hurdy-gurdy`. Tests run against a local
+      // database, so this placeholder is enough for them (and for CI).
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+
   "kv_namespaces": [
     {
       "binding": "OAUTH_KV",
