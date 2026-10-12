@@ -100,3 +100,21 @@ Error: D1_TYPE_ERROR: Type 'undefined' not supported for value 'undefined'
  FAIL  |worker| tests/cache/cached_payload_schemas.test.ts
 Error: Cannot find module '../../src/cache/cached_payload_schemas'  (the module the fix creates)
 ```
+
+
+## Fixed and verified, 2026-10-12
+
+`src/cache/cached_payload_schemas.ts` holds one zod schema per cached page
+shape; `readThrough` takes the schema for its method and treats a payload that
+fails `safeParse` as a miss (logging `cached_payload_rejected` with the failing
+path), so the refetch overwrites the old entry. The seven tests that were red
+are green:
+
+```
+ Test Files  41 passed (41)
+      Tests  377 passed (377)
+```
+
+`npm run typecheck` reports the six errors already in `tests/` and none new.
+The compile-time check that each schema equals the type it guards is a
+separate pull request.
