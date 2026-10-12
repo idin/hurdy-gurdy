@@ -50,6 +50,21 @@ async function runQuietly(
 }
 
 /**
+ * Whether a track has a catalogue id, and so belongs in the library tables.
+ *
+ * The one place the rule is written, for both the filtering in
+ * `findCatalogueTracks` and the position-preserving walk in
+ * `recordPlaylistTracks`, which cannot filter first because a track's position
+ * is its index in the unfiltered playlist.
+ *
+ * @param track - A track the provider returned.
+ * @returns True when the track has an id, narrowed to say so.
+ */
+function checkHasCatalogueId(track: Track): track is Track & { id: string } {
+  return track.id !== null;
+}
+
+/**
  * The tracks that belong in the library tables.
  *
  * Those tables model catalogue tracks, and a local file has no catalogue
@@ -63,7 +78,7 @@ async function runQuietly(
  * @returns Only the tracks with a catalogue id, narrowed to say so.
  */
 function findCatalogueTracks(tracks: Track[]): (Track & { id: string })[] {
-  return tracks.filter((track): track is Track & { id: string } => track.id !== null);
+  return tracks.filter(checkHasCatalogueId);
 }
 
 /**
@@ -307,7 +322,7 @@ export async function recordPlaylistTracks(
   // track keeps the position it has in the playlist; only the local files'
   // rows are absent, because their tracks were never recorded.
   const statements = page.items.flatMap((track, index) => {
-    if (track.id === null) {
+    if (!checkHasCatalogueId(track)) {
       return [];
     }
     return [
