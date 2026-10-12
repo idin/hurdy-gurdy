@@ -13,9 +13,16 @@
  * that does not match is a miss: refetched and replaced, never repaired. A
  * repair would have to know every shape that was ever written; a refetch only
  * has to know the current one.
+ *
+ * **The schemas cannot drift from the types.** Each is checked against the
+ * type it guards at compile time, below, so changing `Track` without changing
+ * `TRACK_SCHEMA` fails `npm run typecheck` instead of failing in production
+ * weeks later.
  */
 
 import { z } from "zod";
+
+import type { Album, Artist, Page, Playlist, Track } from "../providers/media_provider";
 
 /** Shared by every item: which object it is, and whether it is in the library. */
 const LIBRARY_MEMBERSHIP_SHAPE = {
@@ -90,3 +97,48 @@ export const TRACK_PAGE_SCHEMA = buildPageSchema(TRACK_SCHEMA);
 export const ARTIST_PAGE_SCHEMA = buildPageSchema(ARTIST_SCHEMA);
 export const ALBUM_PAGE_SCHEMA = buildPageSchema(ALBUM_SCHEMA);
 export const PLAYLIST_PAGE_SCHEMA = buildPageSchema(PLAYLIST_SCHEMA);
+
+// --- Drift guard -------------------------------------------------------------
+//
+// True only when the two types are identical in both directions — a field
+// added, removed, renamed or made nullable on either side makes it false, and
+// assigning `true` to `false` is a compile error. The standard exact-equality
+// check: plain mutual `extends` would let an optional field pass as required.
+//
+// Both sides are flattened first, deeply. The provider types are written as
+// intersections (`LibraryMembership & { ... }`) and zod infers one flat
+// object; the exact check tells those apart even when every field agrees,
+// which would make the guard fire on correct code.
+
+type FlattenedType<Value> = Value extends (infer Element)[]
+  ? FlattenedType<Element>[]
+  : Value extends object
+    ? { [Key in keyof Value]: FlattenedType<Value[Key]> }
+    : Value;
+
+export type TypeEquality<Left, Right> =
+  (<Probe>() => Probe extends FlattenedType<Left> ? 1 : 2) extends <
+    Probe,
+  >() => Probe extends FlattenedType<Right> ? 1 : 2
+    ? true
+    : false;
+
+export const SCHEMAS_MATCH_TYPES: {
+  track: TypeEquality<z.infer<typeof TRACK_SCHEMA>, Track>;
+  artist: TypeEquality<z.infer<typeof ARTIST_SCHEMA>, Artist>;
+  album: TypeEquality<z.infer<typeof ALBUM_SCHEMA>, Album>;
+  playlist: TypeEquality<z.infer<typeof PLAYLIST_SCHEMA>, Playlist>;
+  trackPage: TypeEquality<z.infer<typeof TRACK_PAGE_SCHEMA>, Page<Track>>;
+  artistPage: TypeEquality<z.infer<typeof ARTIST_PAGE_SCHEMA>, Page<Artist>>;
+  albumPage: TypeEquality<z.infer<typeof ALBUM_PAGE_SCHEMA>, Page<Album>>;
+  playlistPage: TypeEquality<z.infer<typeof PLAYLIST_PAGE_SCHEMA>, Page<Playlist>>;
+} = {
+  track: true,
+  artist: true,
+  album: true,
+  playlist: true,
+  trackPage: true,
+  artistPage: true,
+  albumPage: true,
+  playlistPage: true,
+};
