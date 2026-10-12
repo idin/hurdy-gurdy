@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, test } from "vitest";
 
-import { prepareMediaCache } from "../../src/cache/media_cache_store";
+import { prepareMediaCache } from "../../../src/cache/media_cache_store";
 
 /**
  * The union rules, against real SQL.
