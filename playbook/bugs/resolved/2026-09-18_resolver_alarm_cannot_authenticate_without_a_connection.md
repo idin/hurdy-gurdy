@@ -164,3 +164,5 @@ when both units are `number`. Every arithmetic site touching a renamed value
 needs reading by hand — and the two found here were both comparisons against
 an external API's units, which is where the mismatch is least visible and
 most damaging.
+
+2026-10-12 note: `docs/proposals/audio_feature_extraction.md`, cited above, now lives at `playbook/designs/audio_feature_extraction.md`.
