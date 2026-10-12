@@ -8,7 +8,7 @@ exits 0 on `origin/main`.
 ## What actually happened
 
 `tsc -p tests/tsconfig.json` reports 6 errors and `npm run typecheck` exits non-zero.
-Observed on `origin/main` as of commit 1371507 (the base of this branch; main has since moved to 051db16 and this log was reproduced again on the branch head, which differs only by this file), after `npm ci`, long types trimmed:
+Observed on `origin/main` at commit 1371507 (the branch base, identical in content to `origin/main` at 051db16; reproduced again on the branch head, which differs only by this file), after `npm ci`, long types trimmed:
 
 ```
 tests/cache/views_survive_preparation.test.ts(21,22): error TS2339: Property 'MEDIA_CACHE' does not exist on type 'Env'.
