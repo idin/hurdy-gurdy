@@ -175,8 +175,11 @@ export class SpotifyProvider implements MediaProvider {
    * @param options.grantedScopes - Scopes Spotify granted with the token, for
    *   explaining a refused write; omitted when the session stored none.
    */
-  constructor(accessToken: string, options: { grantedScopes?: string[] } = {}) {
-    this.client = new SpotifyApiClient(accessToken, { grantedScopes: options.grantedScopes ?? null });
+  constructor(accessToken: string, options: { grantedScopes?: string[]; apiBaseUrl?: string } = {}) {
+    this.client = new SpotifyApiClient(accessToken, {
+      grantedScopes: options.grantedScopes ?? null,
+      apiBaseUrl: options.apiBaseUrl,
+    });
   }
 
   async search(

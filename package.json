@@ -12,7 +12,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "vitest run --project worker --project repository",
+    "test": "vitest run --project worker --project network --project repository",
     "test:integration": "vitest run --project integration",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tests/tsconfig.json"
   },
@@ -27,6 +27,7 @@
     "@cloudflare/vitest-pool-workers": "^0.20.3",
     "@cloudflare/workers-types": "^5.20260801.1",
     "@types/node": "^26.2.0",
+    "miniflare": "^4.20260730.0",
     "typescript": "^5.8.2",
     "vitest": "^4.1.10",
     "wrangler": "^4.120.0"

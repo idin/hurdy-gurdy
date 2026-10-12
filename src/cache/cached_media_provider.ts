@@ -100,19 +100,28 @@ export class CachedMediaProvider implements MediaProvider {
    */
   private readonly writeWarning: (message: string) => void;
 
+  /**
+   * @param inner - The provider whose results are cached.
+   * @param options.database - The cache database.
+   * @param options.now - Clock; defaults to `Date.now`.
+   * @param options.userId - Whose budget uncached work is charged to; defaults to null (no budget).
+   * @param options.writeWarning - Where warning lines go; defaults to `console.warn`.
+   */
   constructor(
     inner: MediaProvider,
-    database: D1Database,
-    now: Clock = () => Date.now(),
-    userId: string | null = null,
-    writeWarning: (message: string) => void = (message) => console.warn(message),
+    options: {
+      database: D1Database;
+      now?: Clock;
+      userId?: string | null;
+      writeWarning?: (message: string) => void;
+    },
   ) {
     this.inner = inner;
-    this.database = database;
-    this.now = now;
+    this.database = options.database;
+    this.now = options.now ?? (() => Date.now());
     this.name = inner.name;
-    this.userId = userId;
-    this.writeWarning = writeWarning;
+    this.userId = options.userId ?? null;
+    this.writeWarning = options.writeWarning ?? ((message) => console.warn(message));
   }
 
   /**

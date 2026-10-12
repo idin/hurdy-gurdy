@@ -9,7 +9,7 @@
  */
 
 const SPOTIFY_AUTHORIZE_URL = "https://accounts.spotify.com/authorize";
-const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
+const DEFAULT_SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
 
 /**
  * Scopes this package's tools need, named for what each unlocks.
@@ -118,6 +118,7 @@ function parseGrantedScopes(scope: string | undefined): string[] | null {
  * @param options.code - The `code` query parameter Spotify redirected back with.
  * @param options.codeVerifier - The verifier generated for this authorization.
  * @param options.now - Clock, injected so `expiresAt` is testable.
+ * @param options.tokenUrl - Replaces Spotify's token endpoint; for tests.
  */
 export async function exchangeCodeForTokens(options: {
   clientId: string;
@@ -125,8 +126,9 @@ export async function exchangeCodeForTokens(options: {
   code: string;
   codeVerifier: string;
   now: () => number;
+  tokenUrl?: string;
 }): Promise<SpotifyTokens> {
-  const response = await fetch(SPOTIFY_TOKEN_URL, {
+  const response = await fetch(options.tokenUrl ?? DEFAULT_SPOTIFY_TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -168,13 +170,15 @@ export async function exchangeCodeForTokens(options: {
  * @param options.clientId - This app's Spotify client ID.
  * @param options.refreshToken - The refresh token to use.
  * @param options.now - Clock, injected so `expiresAt` is testable.
+ * @param options.tokenUrl - Replaces Spotify's token endpoint; for tests.
  */
 export async function refreshAccessToken(options: {
   clientId: string;
   refreshToken: string;
   now: () => number;
+  tokenUrl?: string;
 }): Promise<SpotifyTokens> {
-  const response = await fetch(SPOTIFY_TOKEN_URL, {
+  const response = await fetch(options.tokenUrl ?? DEFAULT_SPOTIFY_TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
