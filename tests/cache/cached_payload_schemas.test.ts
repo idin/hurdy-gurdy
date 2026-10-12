@@ -77,10 +77,10 @@ describe("the track page schema", () => {
 // only compiles while every schema matches its type. Nothing here runs: a
 // runtime assertion on a constant the compiler has already fixed cannot fail.
 // Each line below instead stops `npm run typecheck` if the guard answers
-// wrongly. Each case is the expression `true satisfies TypeEquality<...>`, which needs
-// name, so nothing to keep alive; a case that must be `false` sits under
-// `@ts-expect-error`, which itself fails
-// the typecheck if the guard stops reporting the difference.
+// wrongly. Each case is the expression `true satisfies TypeEquality<...>`.
+// That expression needs no name, so nothing is exported only to silence
+// `noUnusedLocals`. A case that must be `false` sits under `@ts-expect-error`,
+// which itself fails the typecheck if the guard stops reporting the difference.
 
 type Membership = { uri: string; inLibrary: boolean };
 type FlatTrack = { uri: string; inLibrary: boolean; isrc: string | null };
