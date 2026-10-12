@@ -1,17 +1,14 @@
 import { describe, expect, test } from "vitest";
 
-import {
-  type TypeEquality,
-  SCHEMAS_MATCH_TYPES,
-  TRACK_PAGE_SCHEMA,
-} from "../../src/cache/cached_payload_schemas";
+import { type TypeEquality, TRACK_PAGE_SCHEMA } from "../../src/cache/cached_payload_schemas";
 
 /**
  * The schemas decide whether a cached page is served, so each has to accept
  * what today's code writes and refuse what older code wrote. The drift guard
  * decides whether a schema still matches its type, so it has to be shown to
  * discriminate — a pass, a genuine fail, and the near-misses that a looser
- * check would wave through.
+ * check would wave through. The guard lives in the compiler, so its cases are
+ * type-level: they are checked by `npm run typecheck`, not by running.
  */
 
 const CURRENT_TRACK = {
@@ -74,55 +71,48 @@ describe("the track page schema", () => {
   });
 });
 
-describe("the drift guard", () => {
-  test("every schema matches the type it guards", () => {
-    expect(SCHEMAS_MATCH_TYPES).toEqual({
-      track: true,
-      artist: true,
-      album: true,
-      playlist: true,
-      trackPage: true,
-      artistPage: true,
-      albumPage: true,
-      playlistPage: true,
-    });
-  });
+// --- The drift guard, shown to discriminate ----------------------------------
+//
+// The guard is a type, `TypeEquality`, and `SCHEMAS_MATCH_TYPES` in the source
+// only compiles while every schema matches its type. Nothing here runs: a
+// runtime assertion on a constant the compiler has already fixed cannot fail.
+// Each line below instead stops `npm run typecheck` if the guard answers
+// wrongly. A case that must be `true` is a plain annotation; a case that must
+// be `false` is annotated `true` under `@ts-expect-error`, which itself fails
+// the typecheck if the guard stops reporting the difference.
 
-  // Checked by the compiler through `npm run typecheck`: each annotation
-  // below only compiles if the guard answers as stated. The runtime assertion
-  // records the same answers so the test also reads as a claim.
+type Membership = { uri: string; inLibrary: boolean };
+type FlatTrack = { uri: string; inLibrary: boolean; isrc: string | null };
 
-  type Membership = { uri: string; inLibrary: boolean };
-  type FlatTrack = { uri: string; inLibrary: boolean; isrc: string | null };
+// An intersection and a flat object with the same fields are equal — the case
+// that made the first version of the guard fire on correct code.
+export const intersectionEqualsFlatObject: TypeEquality<
+  Membership & { isrc: string | null },
+  FlatTrack
+> = true;
 
-  test("an intersection and a flat object with the same fields are equal", () => {
-    // The case that made the first version of the guard fire on correct code.
-    const answer: TypeEquality<Membership & { isrc: string | null }, FlatTrack> = true;
-    expect(answer).toBe(true);
-  });
+// A missing field is a difference.
+// @ts-expect-error the types differ, so the guard must not answer true
+export const missingFieldIsADifference: TypeEquality<Membership, FlatTrack> = true;
 
-  test("a missing field is a difference", () => {
-    const answer: TypeEquality<Membership, FlatTrack> = false;
-    expect(answer).toBe(false);
-  });
+// A field that became non-nullable is a difference.
+// @ts-expect-error the types differ, so the guard must not answer true
+export const changedNullabilityIsADifference: TypeEquality<
+  Membership & { isrc: string },
+  FlatTrack
+> = true;
 
-  test("a field that became nullable is a difference", () => {
-    const answer: TypeEquality<Membership & { isrc: string }, FlatTrack> = false;
-    expect(answer).toBe(false);
-  });
+// The near-miss: `isrc?:` accepts an absent field, which is exactly the
+// old-shape payload the schema exists to refuse.
+// @ts-expect-error the types differ, so the guard must not answer true
+export const optionalIsNotNullable: TypeEquality<
+  Membership & { isrc?: string | null },
+  FlatTrack
+> = true;
 
-  test("an optional field is not the same as a nullable required one", () => {
-    // The near-miss: `isrc?:` accepts an absent field, which is exactly the
-    // old-shape payload the schema exists to refuse.
-    const answer: TypeEquality<Membership & { isrc?: string | null }, FlatTrack> = false;
-    expect(answer).toBe(false);
-  });
-
-  test("a difference nested inside an array is still a difference", () => {
-    const answer: TypeEquality<
-      { artists: { uri: string; name: string }[] },
-      { artists: { uri: string }[] }
-    > = false;
-    expect(answer).toBe(false);
-  });
-});
+// A difference nested inside an array is still a difference.
+// @ts-expect-error the types differ, so the guard must not answer true
+export const nestedDifferenceInArrayIsADifference: TypeEquality<
+  { artists: { uri: string; name: string }[] },
+  { artists: { uri: string }[] }
+> = true;
