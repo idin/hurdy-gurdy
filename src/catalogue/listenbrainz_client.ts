@@ -23,7 +23,7 @@
  * built to handle.
  */
 
-const LISTENBRAINZ_API_BASE = "https://api.listenbrainz.org/1";
+const DEFAULT_LISTENBRAINZ_API_BASE_URL = "https://api.listenbrainz.org/1";
 
 /**
  * Requests allowed per window, from their own `X-RateLimit-Limit` header.
@@ -85,19 +85,19 @@ export type MappedRecording = {
  * @param query.artistName - As the provider spells it.
  * @param query.recordingName - The track title.
  * @param token - A ListenBrainz user token.
- * @param fetcher - Injected so tests do not reach the network.
+ * @param options.apiBaseUrl - Overridable so tests can point at a local server.
  */
 export async function mapRecording(
   query: { artistName: string; recordingName: string },
   token: string,
-  fetcher: typeof fetch = fetch,
+  options: { apiBaseUrl?: string } = {},
 ): Promise<MappedRecording | null> {
   const url =
-    `${LISTENBRAINZ_API_BASE}/metadata/lookup/`
+    `${options.apiBaseUrl ?? DEFAULT_LISTENBRAINZ_API_BASE_URL}/metadata/lookup/`
     + `?artist_name=${encodeURIComponent(query.artistName)}`
     + `&recording_name=${encodeURIComponent(query.recordingName)}`;
 
-  const response = await fetcher(url, {
+  const response = await fetch(url, {
     headers: { Authorization: `Token ${token}` },
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS),
   });

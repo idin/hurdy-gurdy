@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 
 import {
   findRateLimitDelay,
@@ -6,6 +6,7 @@ import {
   ListenBrainzError,
   mapRecording,
 } from "../../src/catalogue/listenbrainz_client";
+import { startLocalHttpServer, type LocalHttpServer } from "../local_http_server";
 
 /**
  * Response shapes copied from live calls on 2026-09-13, including the two
@@ -23,25 +24,31 @@ const MATCHED = {
   release_name: "Life Is a Dream",
 };
 
-function fakeMapper(body: unknown, status = 200) {
-  const requests: { url: string; auth: string | null }[] = [];
-  const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-    const headers = new Headers(init?.headers);
-    requests.push({ url: input.toString(), auth: headers.get("Authorization") });
-    return new Response(JSON.stringify(body), { status });
-  }) as unknown as typeof fetch;
-  return { fetcher, requests };
+/** The path ListenBrainz serves its API under; the client appends `/metadata/lookup/` to it. */
+const API_PATH = "/1";
+
+let server: LocalHttpServer | null = null;
+
+afterEach(async () => {
+  await server?.close();
+  server = null;
+});
+
+/** Starts a real local server that answers every request with `body`, and returns what the client needs to reach it. */
+async function startMapper(body: unknown, status = 200) {
+  server = await startLocalHttpServer({ respond: () => ({ status, body }) });
+  return { apiBaseUrl: `${server.origin}${API_PATH}`, requests: server.requests };
 }
 
 describe("mapRecording", () => {
   test("maps a name pair onto a MusicBrainz recording", async () => {
     // The exact lookup MusicBrainz's own service would not serve.
-    const { fetcher } = fakeMapper(MATCHED);
+    const { apiBaseUrl } = await startMapper(MATCHED);
 
     const found = await mapRecording(
       { artistName: "Noel Harrison", recordingName: "Windmills of Your Mind" },
       "token",
-      fetcher,
+      { apiBaseUrl },
     );
 
     expect(found?.recordingMbid).toBe("8e0bed40-e48b-44c1-8fbe-a6194e5cf103");
@@ -50,12 +57,12 @@ describe("mapRecording", () => {
 
   test("a track the mapper cannot place returns null, not an error", async () => {
     // ListenBrainz signals no match with a body carrying no recording_mbid.
-    const { fetcher } = fakeMapper({});
+    const { apiBaseUrl } = await startMapper({});
 
     const found = await mapRecording(
       { artistName: "Nobody", recordingName: "Nothing" },
       "token",
-      fetcher,
+      { apiBaseUrl },
     );
 
     expect(found).toBeNull();
@@ -63,31 +70,32 @@ describe("mapRecording", () => {
 
   test("sends the token as an Authorization header", async () => {
     // Every endpoint here is 401 without it.
-    const { fetcher, requests } = fakeMapper(MATCHED);
+    const { apiBaseUrl, requests } = await startMapper(MATCHED);
 
-    await mapRecording({ artistName: "a", recordingName: "b" }, "secret-token", fetcher);
+    await mapRecording({ artistName: "a", recordingName: "b" }, "secret-token", { apiBaseUrl });
 
-    expect(requests[0].auth).toBe("Token secret-token");
+    expect(requests[0].headers.authorization).toBe("Token secret-token");
   });
 
   test("escapes names that would otherwise break the query string", async () => {
-    const { fetcher, requests } = fakeMapper(MATCHED);
+    const { apiBaseUrl, requests } = await startMapper(MATCHED);
 
     await mapRecording(
       { artistName: "AC/DC", recordingName: "Christmas Eve / Sarajevo 12/24" },
       "token",
-      fetcher,
+      { apiBaseUrl },
     );
 
-    expect(requests[0].url).toContain("AC%2FDC");
-    expect(() => new URL(requests[0].url)).not.toThrow();
+    expect(requests[0].target).toContain("AC%2FDC");
+    expect(requests[0].query.get("artist_name")).toBe("AC/DC");
+    expect(requests[0].query.get("recording_name")).toBe("Christmas Eve / Sarajevo 12/24");
   });
 
   test("a rate-limit refusal is distinguishable from a lookup failure", async () => {
-    const { fetcher } = fakeMapper({ error: "rate limited" }, 429);
+    const { apiBaseUrl } = await startMapper({ error: "rate limited" }, 429);
 
     await expect(
-      mapRecording({ artistName: "a", recordingName: "b" }, "token", fetcher),
+      mapRecording({ artistName: "a", recordingName: "b" }, "token", { apiBaseUrl }),
     ).rejects.toSatisfy(isListenBrainzRateLimited);
   });
 

@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 
 import {
   findRecordingByIsrc,
@@ -7,6 +7,7 @@ import {
   MusicBrainzError,
   searchRecording,
 } from "../../src/catalogue/musicbrainz_client";
+import { startLocalHttpServer, type LocalHttpServer } from "../local_http_server";
 
 /**
  * Response shapes copied from real MusicBrainz calls on 2026-09-13, including
@@ -30,31 +31,40 @@ const RECORDING_WITHOUT_WORK = {
   relations: [],
 };
 
-/** Serves the two-hop chain: ISRC lookup, then recording detail. */
-function fakeMusicBrainz(recording: unknown, options: { isrcFound?: boolean } = {}) {
-  const requests: { url: string; userAgent: string | null }[] = [];
-  const fetcher = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-    const url = input.toString();
-    const headers = new Headers(init?.headers);
-    requests.push({ url, userAgent: headers.get("User-Agent") });
+/** The path MusicBrainz serves its API under; the client appends resource paths to it. */
+const API_PATH = "/ws/2";
 
-    if (url.includes("/isrc/")) {
-      const body =
-        options.isrcFound === false
-          ? { recordings: [] }
-          : { recordings: [{ id: (recording as { id: string }).id, title: "x" }] };
-      return new Response(JSON.stringify(body), { status: 200 });
-    }
-    return new Response(JSON.stringify(recording), { status: 200 });
-  }) as unknown as typeof fetch;
-  return { fetcher, requests };
+let server: LocalHttpServer | null = null;
+
+afterEach(async () => {
+  await server?.close();
+  server = null;
+});
+
+/** Serves the two-hop chain over a real local server: ISRC lookup, then recording detail. */
+async function startMusicBrainz(recording: unknown, options: { isrcFound?: boolean } = {}) {
+  server = await startLocalHttpServer({
+    respond: (request) => {
+      if (request.path.includes("/isrc/")) {
+        return {
+          status: 200,
+          body:
+            options.isrcFound === false
+              ? { recordings: [] }
+              : { recordings: [{ id: (recording as { id: string }).id, title: "x" }] },
+        };
+      }
+      return { status: 200, body: recording };
+    },
+  });
+  return { apiBaseUrl: `${server.origin}${API_PATH}`, requests: server.requests };
 }
 
 describe("findRecordingByIsrc", () => {
   test("resolves an ISRC to a recording and its composition", async () => {
-    const { fetcher } = fakeMusicBrainz(RECORDING_WITH_WORK);
+    const { apiBaseUrl } = await startMusicBrainz(RECORDING_WITH_WORK);
 
-    const found = await findRecordingByIsrc("USRE10301456", fetcher);
+    const found = await findRecordingByIsrc("USRE10301456", { apiBaseUrl });
 
     expect(found?.mbid).toBe("rec-1");
     expect(found?.artistName).toBe("Sting");
@@ -64,9 +74,9 @@ describe("findRecordingByIsrc", () => {
   test("a recording with no work relation still resolves", async () => {
     // The case observed live. A missing link is DATA — MusicBrainz does not
     // say — not a failure, and the recording id is still worth keeping.
-    const { fetcher } = fakeMusicBrainz(RECORDING_WITHOUT_WORK);
+    const { apiBaseUrl } = await startMusicBrainz(RECORDING_WITHOUT_WORK);
 
-    const found = await findRecordingByIsrc("USRE10301456", fetcher);
+    const found = await findRecordingByIsrc("USRE10301456", { apiBaseUrl });
 
     expect(found?.mbid).toBe("rec-2");
     expect(found?.workMbid).toBeNull();
@@ -74,31 +84,31 @@ describe("findRecordingByIsrc", () => {
   });
 
   test("an unknown ISRC returns null rather than throwing", async () => {
-    const { fetcher } = fakeMusicBrainz(RECORDING_WITH_WORK, { isrcFound: false });
+    const { apiBaseUrl } = await startMusicBrainz(RECORDING_WITH_WORK, { isrcFound: false });
 
-    expect(await findRecordingByIsrc("NOPE00000000", fetcher)).toBeNull();
+    expect(await findRecordingByIsrc("NOPE00000000", { apiBaseUrl })).toBeNull();
   });
 
   test("sends a User-Agent identifying the application and a contact", async () => {
     // MusicBrainz blocks anonymous clients outright. This is not politeness.
-    const { fetcher, requests } = fakeMusicBrainz(RECORDING_WITH_WORK);
+    const { apiBaseUrl, requests } = await startMusicBrainz(RECORDING_WITH_WORK);
 
-    await findRecordingByIsrc("USRE10301456", fetcher);
+    await findRecordingByIsrc("USRE10301456", { apiBaseUrl });
 
-    expect(requests[0].userAgent).toBe(MUSICBRAINZ_USER_AGENT);
-    expect(requests[0].userAgent).toMatch(/@/);
+    expect(requests[0].headers["user-agent"]).toBe(MUSICBRAINZ_USER_AGENT);
+    expect(requests[0].headers["user-agent"]).toMatch(/@/);
   });
 
   test("takes exactly two requests, because the isrc resource carries no relations", async () => {
     // Verified 2026-09-13: ?inc=recordings+work-rels on /isrc/ is refused
     // with "recordings is not a valid inc parameter for the isrc resource".
-    const { fetcher, requests } = fakeMusicBrainz(RECORDING_WITH_WORK);
+    const { apiBaseUrl, requests } = await startMusicBrainz(RECORDING_WITH_WORK);
 
-    await findRecordingByIsrc("USRE10301456", fetcher);
+    await findRecordingByIsrc("USRE10301456", { apiBaseUrl });
 
     expect(requests).toHaveLength(2);
-    expect(requests[0].url).toContain("/isrc/");
-    expect(requests[1].url).toContain("/recording/");
+    expect(requests[0].path).toContain("/isrc/");
+    expect(requests[1].path).toContain("/recording/");
   });
 });
 
@@ -130,45 +140,40 @@ describe("searchRecording", () => {
     ],
   };
 
-  function fakeSearch(results: unknown, detail: unknown = { id: "x", title: "x" }) {
-    const requests: string[] = [];
-    const fetcher = vi.fn(async (input: string | URL | Request) => {
-      const url = input.toString();
-      requests.push(url);
-      return new Response(
-        JSON.stringify(url.includes("query=") ? results : detail),
-        { status: 200 },
-      );
-    }) as unknown as typeof fetch;
-    return { fetcher, requests };
+  /** Real local server: the search query gets `results`, the detail lookup gets `detail`. */
+  async function startSearch(results: unknown, detail: unknown = { id: "x", title: "x" }) {
+    server = await startLocalHttpServer({
+      respond: (request) => ({ status: 200, body: request.query.has("query") ? results : detail }),
+    });
+    return { apiBaseUrl: `${server.origin}${API_PATH}`, requests: server.requests };
   }
 
   test("duration picks the right one among equally-scored matches", async () => {
     // The whole danger. Four recordings score 100 and span three minutes of
     // length; taking the top score would pick arbitrarily among genuinely
     // different recordings.
-    const { fetcher, requests } = fakeSearch(ACE_OF_SPADES, {
+    const { apiBaseUrl, requests } = await startSearch(ACE_OF_SPADES, {
       id: "rec-studio",
       title: "Ace of Spades",
     });
 
     const found = await searchRecording(
       { title: "Ace of Spades", artistName: "Motörhead", durationSeconds: 168 },
-      fetcher,
+      { apiBaseUrl },
     );
 
     expect(found?.mbid).toBe("rec-studio");
-    expect(requests[1]).toContain("rec-studio");
+    expect(requests[1].path).toContain("rec-studio");
   });
 
   test("returns null rather than guessing when no length is close", async () => {
     // A wrong composition link groups two unrelated songs, invisibly. That is
     // the failure that made ISRC replace title matching in the first place.
-    const { fetcher } = fakeSearch(ACE_OF_SPADES);
+    const { apiBaseUrl } = await startSearch(ACE_OF_SPADES);
 
     const found = await searchRecording(
       { title: "Ace of Spades", artistName: "Motörhead", durationSeconds: 240 },
-      fetcher,
+      { apiBaseUrl },
     );
 
     expect(found).toBeNull();
@@ -177,13 +182,13 @@ describe("searchRecording", () => {
   test("refuses a weak title match even at the right length", async () => {
     // A low score means the name matched loosely — a different song sharing
     // words, which the length cannot rescue.
-    const { fetcher } = fakeSearch({
+    const { apiBaseUrl } = await startSearch({
       recordings: [{ id: "rec-other", title: "Ace", score: 55, length: 168_000 }],
     });
 
     const found = await searchRecording(
       { title: "Ace of Spades", artistName: "Motörhead", durationSeconds: 168 },
-      fetcher,
+      { apiBaseUrl },
     );
 
     expect(found).toBeNull();
@@ -192,27 +197,27 @@ describe("searchRecording", () => {
   test("ignores a result with no length at all", async () => {
     // Without a length there is nothing to disambiguate with, so accepting it
     // would be taking the top score — the thing this exists to avoid.
-    const { fetcher } = fakeSearch({
+    const { apiBaseUrl } = await startSearch({
       recordings: [{ id: "rec-nolength", title: "Ace of Spades", score: 100 }],
     });
 
     const found = await searchRecording(
       { title: "Ace of Spades", artistName: "Motörhead", durationSeconds: 168 },
-      fetcher,
+      { apiBaseUrl },
     );
 
     expect(found).toBeNull();
   });
 
   test("accepts a small difference, since masters drift by a second or two", async () => {
-    const { fetcher } = fakeSearch(
+    const { apiBaseUrl } = await startSearch(
       { recordings: [{ id: "rec-studio", title: "Ace of Spades", score: 100, length: 168_000 }] },
       { id: "rec-studio", title: "Ace of Spades" },
     );
 
     const found = await searchRecording(
       { title: "Ace of Spades", artistName: "Motörhead", durationSeconds: 170 },
-      fetcher,
+      { apiBaseUrl },
     );
 
     expect(found?.mbid).toBe("rec-studio");
@@ -221,14 +226,14 @@ describe("searchRecording", () => {
   test("escapes Lucene syntax that track titles genuinely contain", async () => {
     // An unescaped quote or colon makes a malformed query, which MusicBrainz
     // rejects rather than ignoring.
-    const { fetcher, requests } = fakeSearch({ recordings: [] });
+    const { apiBaseUrl, requests } = await startSearch({ recordings: [] });
 
     await searchRecording(
       { title: 'Christmas Eve / Sarajevo 12/24 (Instrumental)', artistName: "A:B", durationSeconds: 1 },
-      fetcher,
+      { apiBaseUrl },
     );
 
-    expect(requests[0]).toContain("query=");
-    expect(() => decodeURIComponent(requests[0])).not.toThrow();
+    expect(requests[0].query.has("query")).toBe(true);
+    expect(() => decodeURIComponent(requests[0].target)).not.toThrow();
   });
 });

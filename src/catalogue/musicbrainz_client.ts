@@ -27,7 +27,10 @@
  */
 
 /** Base for every MusicBrainz web-service call. */
-const MUSICBRAINZ_API_BASE = "https://musicbrainz.org/ws/2";
+const DEFAULT_MUSICBRAINZ_API_BASE_URL = "https://musicbrainz.org/ws/2";
+
+/** Options shared by every MusicBrainz request. */
+export type MusicBrainzRequestOptions = { apiBaseUrl?: string };
 
 /**
  * Identifies this application to MusicBrainz.
@@ -113,16 +116,16 @@ export type MusicBrainzRecording = {
  * this is resolver work rather than something a tool call does inline.
  *
  * @param isrc - The recording's ISRC.
- * @param fetcher - Injected so tests do not reach the network.
+ * @param options.apiBaseUrl - Overridable so tests can point at a local server.
  * @returns The recording, or null when MusicBrainz does not know this ISRC.
  */
 export async function findRecordingByIsrc(
   isrc: string,
-  fetcher: typeof fetch = fetch,
+  options: MusicBrainzRequestOptions = {},
 ): Promise<MusicBrainzRecording | null> {
   const found = await requestJson<{ recordings?: { id: string; title: string }[] }>(
     `/isrc/${encodeURIComponent(isrc)}?fmt=json`,
-    fetcher,
+    options,
   );
 
   const recording = found.recordings?.[0];
@@ -130,7 +133,7 @@ export async function findRecordingByIsrc(
     return null;
   }
 
-  return findRecordingDetail(recording.id, fetcher);
+  return findRecordingDetail(recording.id, options);
 }
 
 /**
@@ -141,18 +144,18 @@ export async function findRecordingByIsrc(
  * it.
  *
  * @param mbid - The recording's MusicBrainz id.
- * @param fetcher - Injected for tests.
+ * @param options.apiBaseUrl - Overridable so tests can point at a local server.
  */
 export async function findRecordingDetail(
   mbid: string,
-  fetcher: typeof fetch = fetch,
+  options: MusicBrainzRequestOptions = {},
 ): Promise<MusicBrainzRecording> {
   const detail = await requestJson<{
     id: string;
     title: string;
     "artist-credit"?: { name: string }[];
     relations?: { work?: { id: string; title: string } }[];
-  }>(`/recording/${encodeURIComponent(mbid)}?inc=work-rels+artist-credits&fmt=json`, fetcher);
+  }>(`/recording/${encodeURIComponent(mbid)}?inc=work-rels+artist-credits&fmt=json`, options);
 
   const work = (detail.relations ?? []).find((relation) => relation.work)?.work;
 
@@ -172,8 +175,8 @@ export async function findRecordingDetail(
  * thrown, because "MusicBrainz has never heard of this ISRC" is an answer.
  * A 503 throws, because it means the question was never asked.
  */
-async function requestJson<Result>(path: string, fetcher: typeof fetch): Promise<Result> {
-  const response = await fetcher(`${MUSICBRAINZ_API_BASE}${path}`, {
+async function requestJson<Result>(path: string, options: MusicBrainzRequestOptions): Promise<Result> {
+  const response = await fetch(`${options.apiBaseUrl ?? DEFAULT_MUSICBRAINZ_API_BASE_URL}${path}`, {
     headers: { "User-Agent": MUSICBRAINZ_USER_AGENT, Accept: "application/json" },
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MILLISECONDS),
   });
@@ -239,17 +242,17 @@ export const MINIMUM_SEARCH_SCORE = 90;
  * @param query.title - The recording's title.
  * @param query.artistName - The performing artist.
  * @param query.durationSeconds - Its length, which does the disambiguating.
- * @param fetcher - Injected for tests.
+ * @param options.apiBaseUrl - Overridable so tests can point at a local server.
  * @returns The matching recording, or null when none is close enough.
  */
 export async function searchRecording(
   query: { title: string; artistName: string; durationSeconds: number },
-  fetcher: typeof fetch = fetch,
+  options: MusicBrainzRequestOptions = {},
 ): Promise<MusicBrainzRecording | null> {
   const lucene = `recording:"${escapeLucene(query.title)}" AND artist:"${escapeLucene(query.artistName)}"`;
   const found = await requestJson<{
     recordings?: { id: string; title: string; score?: number; length?: number }[];
-  }>(`/recording?query=${encodeURIComponent(lucene)}&limit=25&fmt=json`, fetcher);
+  }>(`/recording?query=${encodeURIComponent(lucene)}&limit=25&fmt=json`, options);
 
   const candidate = (found.recordings ?? []).find(
     (recording) =>
@@ -259,7 +262,7 @@ export async function searchRecording(
         <= SEARCH_DURATION_TOLERANCE_SECONDS,
   );
 
-  return candidate === undefined ? null : findRecordingDetail(candidate.id, fetcher);
+  return candidate === undefined ? null : findRecordingDetail(candidate.id, options);
 }
 
 /**

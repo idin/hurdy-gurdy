@@ -1,5 +1,4 @@
-import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "vitest";
 
 import { prepareMediaCache } from "../../src/cache/media_cache_store";
 import { SpotifyApiClient } from "../../src/providers/spotify/spotify_api_client";
@@ -11,6 +10,13 @@ import {
   RESOLUTION_PRIORITY,
 } from "../../src/resolver/resolution_queue";
 import { runResolutionTask } from "../../src/resolver/resolve_artist_totals";
+import { startLocalWorkersStorage, type LocalWorkersStorage } from "../local_workers_storage";
+import {
+  startLocalSpotifyServer,
+  type LocalSpotifyServer,
+  type RecordedRequest,
+  type ServerReply,
+} from "../providers/spotify/local_spotify_server";
 
 /**
  * The two risks here are resuming and partial sums.
@@ -22,14 +28,37 @@ import { runResolutionTask } from "../../src/resolver/resolve_artist_totals";
  * strong relationship where there is a weak one.
  */
 
-const database = (env as { MEDIA_CACHE: D1Database }).MEDIA_CACHE;
+let storage: LocalWorkersStorage;
+let database: D1Database;
+let server: LocalSpotifyServer | null = null;
+
+beforeAll(async () => {
+  storage = await startLocalWorkersStorage();
+  database = storage.database;
+});
+
+afterAll(async () => {
+  await storage.dispose();
+});
+
+afterEach(async () => {
+  await server?.close();
+  server = null;
+});
+
+/** Starts a real local Spotify and returns a client aimed at it. */
+async function clientServedBy(respond: (request: RecordedRequest) => ServerReply): Promise<SpotifyApiClient> {
+  await server?.close();
+  server = await startLocalSpotifyServer({ respond });
+  return new SpotifyApiClient("t", { grantedScopes: null, apiBaseUrl: server.apiBaseUrl });
+}
 const NOW = Date.parse("2026-09-13T12:00:00Z");
 const ARTIST = "spotify:artist:pf";
 
 /** A paging response shaped like Spotify's, with `next` set when more remain. */
 function albumsPage(options: { offset: number; total: number; trackCounts: number[] }) {
   const consumed = options.offset + options.trackCounts.length;
-  return JSON.stringify({
+  return {
     href: "https://api.spotify.com/v1/artists/pf/albums",
     limit: 10,
     next: consumed < options.total ? "https://api.spotify.com/v1/next" : null,
@@ -45,28 +74,28 @@ function albumsPage(options: { offset: number; total: number; trackCounts: numbe
       uri: `spotify:album:album-${options.offset + index}`,
       images: [],
     })),
-  });
+  };
 }
 
-/** Serves pages of ten, counting how many requests were made. */
-function pagedFetch(totalAlbums: number, tracksPerAlbum: number) {
-  const requests: string[] = [];
-  globalThis.fetch = vi.fn(async (input: string | URL | Request) => {
-    const url = new URL(input.toString());
-    requests.push(url.toString());
-    const offset = Number(url.searchParams.get("offset") ?? 0);
-    const remaining = Math.max(0, totalAlbums - offset);
-    const size = Math.min(10, remaining);
-    return new Response(
-      albumsPage({
+/** Serves pages of ten; the server records every request, which `requests()` reads back. */
+async function pagedClient(totalAlbums: number, tracksPerAlbum: number): Promise<SpotifyApiClient> {
+  return clientServedBy((request) => {
+    const offset = Number(request.query.get("offset") ?? 0);
+    const size = Math.min(10, Math.max(0, totalAlbums - offset));
+    return {
+      status: 200,
+      body: albumsPage({
         offset,
         total: totalAlbums,
         trackCounts: Array.from({ length: size }, () => tracksPerAlbum),
       }),
-      { status: 200 },
-    );
-  }) as unknown as typeof fetch;
-  return requests;
+    };
+  });
+}
+
+/** Every request the local Spotify has received, as path and query. */
+function requests(): string[] {
+  return (server?.requests ?? []).map((request) => request.pathAndQuery);
 }
 
 async function seedArtist(): Promise<void> {
@@ -94,7 +123,7 @@ beforeEach(async () => {
 
 describe("artist album count", () => {
   test("lands from a single request, because total arrives on page one", async () => {
-    const requests = pagedFetch(312, 12);
+    const client = await pagedClient(312, 12);
     await enqueueResolutions(
       database,
       [{ kind: "artist-album-count", subjectUri: ARTIST, priority: RESOLUTION_PRIORITY.FOLLOWED_ARTIST }],
@@ -102,42 +131,42 @@ describe("artist album count", () => {
     );
     const task = await findNextResolution(database);
 
-    const result = await runResolutionTask(database, new SpotifyApiClient("t"), task!);
+    const result = await runResolutionTask(database, client, task!);
 
     expect(result.outcome).toBe("completed");
     expect((await readTotals()).albums).toBe(312);
-    expect(requests).toHaveLength(1);
+    expect(requests()).toHaveLength(1);
   });
 
   test("asks for ten per page, the cap this endpoint actually accepts", async () => {
     // limit=20 and limit=50 both return 400 Invalid limit on the live API.
-    const requests = pagedFetch(312, 12);
+    const client = await pagedClient(312, 12);
     await enqueueResolutions(
       database,
       [{ kind: "artist-album-count", subjectUri: ARTIST, priority: RESOLUTION_PRIORITY.FOLLOWED_ARTIST }],
       NOW,
     );
-    await runResolutionTask(database, new SpotifyApiClient("t"), (await findNextResolution(database))!);
+    await runResolutionTask(database, client, (await findNextResolution(database))!);
 
-    expect(requests[0]).toContain("limit=10");
+    expect(requests()[0]).toContain("limit=10");
   });
 
   test("counts albums and singles, not records the artist merely appears on", async () => {
-    const requests = pagedFetch(10, 12);
+    const client = await pagedClient(10, 12);
     await enqueueResolutions(
       database,
       [{ kind: "artist-album-count", subjectUri: ARTIST, priority: RESOLUTION_PRIORITY.FOLLOWED_ARTIST }],
       NOW,
     );
-    await runResolutionTask(database, new SpotifyApiClient("t"), (await findNextResolution(database))!);
+    await runResolutionTask(database, client, (await findNextResolution(database))!);
 
-    expect(requests[0]).toContain("include_groups=album%2Csingle");
+    expect(requests()[0]).toContain("include_groups=album%2Csingle");
   });
 });
 
 describe("artist track count", () => {
   test("completes in one tick when the artist is small", async () => {
-    pagedFetch(5, 10);
+    const client = await pagedClient(5, 10);
     await enqueueResolutions(
       database,
       [{ kind: "artist-track-count", subjectUri: ARTIST, priority: RESOLUTION_PRIORITY.FOLLOWED_ARTIST }],
@@ -146,7 +175,7 @@ describe("artist track count", () => {
 
     const result = await runResolutionTask(
       database,
-      new SpotifyApiClient("t"),
+      client,
       (await findNextResolution(database))!,
     );
 
@@ -158,7 +187,7 @@ describe("artist track count", () => {
     // A partial sum is a wrong denominator, and a wrong one is worse than an
     // absent one: "3 of 40" reads as a strong relationship where the truth
     // is "3 of 312".
-    pagedFetch(100, 10);
+    const client = await pagedClient(100, 10);
     await enqueueResolutions(
       database,
       [{ kind: "artist-track-count", subjectUri: ARTIST, priority: RESOLUTION_PRIORITY.FOLLOWED_ARTIST }],
@@ -167,7 +196,7 @@ describe("artist track count", () => {
 
     const result = await runResolutionTask(
       database,
-      new SpotifyApiClient("t"),
+      client,
       (await findNextResolution(database))!,
     );
 
@@ -178,14 +207,14 @@ describe("artist track count", () => {
   test("resumes where it stopped instead of starting over", async () => {
     // The failure this catches: a long crawl that restarts each tick never
     // finishes, and the artist's denominator stays null forever.
-    pagedFetch(100, 10);
+    const client = await pagedClient(100, 10);
     await enqueueResolutions(
       database,
       [{ kind: "artist-track-count", subjectUri: ARTIST, priority: RESOLUTION_PRIORITY.FOLLOWED_ARTIST }],
       NOW,
     );
 
-    await runResolutionTask(database, new SpotifyApiClient("t"), (await findNextResolution(database))!);
+    await runResolutionTask(database, client, (await findNextResolution(database))!);
     const afterFirst = await findNextResolution(database);
 
     // Eight pages of ten releases, ten tracks each. The numbers track
@@ -197,7 +226,7 @@ describe("artist track count", () => {
 
   test("reaches the right total across many ticks", async () => {
     // 100 albums of 10 tracks, three pages a tick: four ticks, 1000 tracks.
-    pagedFetch(100, 10);
+    const client = await pagedClient(100, 10);
     await enqueueResolutions(
       database,
       [{ kind: "artist-track-count", subjectUri: ARTIST, priority: RESOLUTION_PRIORITY.FOLLOWED_ARTIST }],
@@ -209,7 +238,7 @@ describe("artist track count", () => {
       if (task === null) {
         break;
       }
-      await runResolutionTask(database, new SpotifyApiClient("t"), task);
+      await runResolutionTask(database, client, task);
     }
 
     expect((await readTotals()).tracks).toBe(1000);
@@ -219,29 +248,25 @@ describe("artist track count", () => {
   test("an album with no track count contributes zero, not NaN", async () => {
     // The near-miss: total_tracks is optional on a simplified album, and
     // adding undefined would poison the whole sum.
-    globalThis.fetch = vi.fn(async () =>
-      new Response(
-        JSON.stringify({
-          href: "h",
-          limit: 10,
-          next: null,
-          offset: 0,
-          previous: null,
-          total: 1,
-          items: [
-            { id: "a", name: "A", artists: [], release_date: "1971", uri: "spotify:album:a", images: [] },
-          ],
-        }),
-        { status: 200 },
-      ),
-    ) as unknown as typeof fetch;
+    const client = await clientServedBy(() => ({
+      status: 200,
+      body: {
+        href: "h",
+        limit: 10,
+        next: null,
+        offset: 0,
+        previous: null,
+        total: 1,
+        items: [{ id: "a", name: "A", artists: [], release_date: "1971", uri: "spotify:album:a", images: [] }],
+      },
+    }));
     await enqueueResolutions(
       database,
       [{ kind: "artist-track-count", subjectUri: ARTIST, priority: RESOLUTION_PRIORITY.FOLLOWED_ARTIST }],
       NOW,
     );
 
-    await runResolutionTask(database, new SpotifyApiClient("t"), (await findNextResolution(database))!);
+    await runResolutionTask(database, client, (await findNextResolution(database))!);
 
     expect((await readTotals()).tracks).toBe(0);
   });
@@ -249,9 +274,7 @@ describe("artist track count", () => {
 
 describe("failure handling", () => {
   test("a failing task is retried, then stops being selected", async () => {
-    globalThis.fetch = vi.fn(async () =>
-      new Response(JSON.stringify({ error: { status: 404 } }), { status: 404 }),
-    ) as unknown as typeof fetch;
+    const client = await clientServedBy(() => ({ status: 404, body: { error: { status: 404 } } }));
     await enqueueResolutions(
       database,
       [{ kind: "artist-album-count", subjectUri: ARTIST, priority: RESOLUTION_PRIORITY.FOLLOWED_ARTIST }],
@@ -261,7 +284,7 @@ describe("failure handling", () => {
     for (let attempt = 0; attempt < MAXIMUM_ATTEMPTS; attempt += 1) {
       const task = await findNextResolution(database);
       expect(task).not.toBeNull();
-      const result = await runResolutionTask(database, new SpotifyApiClient("t"), task!);
+      const result = await runResolutionTask(database, client, task!);
       expect(result.outcome).toBe("failed");
     }
 
@@ -271,9 +294,7 @@ describe("failure handling", () => {
   });
 
   test("a stuck task does not block the tier behind it", async () => {
-    globalThis.fetch = vi.fn(async () =>
-      new Response(JSON.stringify({ error: { status: 404 } }), { status: 404 }),
-    ) as unknown as typeof fetch;
+    const client = await clientServedBy(() => ({ status: 404, body: { error: { status: 404 } } }));
     await enqueueResolutions(
       database,
       [
@@ -284,7 +305,7 @@ describe("failure handling", () => {
     );
 
     for (let attempt = 0; attempt < MAXIMUM_ATTEMPTS; attempt += 1) {
-      await runResolutionTask(database, new SpotifyApiClient("t"), (await findNextResolution(database))!);
+      await runResolutionTask(database, client, (await findNextResolution(database))!);
     }
 
     const next = await findNextResolution(database);

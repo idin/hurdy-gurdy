@@ -67,6 +67,12 @@ export const PAGES_PER_TICK = 8;
  */
 export const COUNTED_ALBUM_GROUPS = "album,single";
 
+/** Where the resolver reaches ListenBrainz and MusicBrainz; each defaults to the real host. */
+export type ResolverUpstreamOptions = {
+  listenBrainzApiBaseUrl?: string;
+  musicBrainzApiBaseUrl?: string;
+};
+
 /** Extracts the artist id from a `spotify:artist:...` URI. */
 function findArtistId(subjectUri: string): string {
   return subjectUri.split(":").pop() ?? subjectUri;
@@ -90,6 +96,7 @@ export async function runResolutionTask(
   task: ResolutionTask,
   provider?: MediaProvider,
   listenBrainzToken?: string,
+  upstreams: ResolverUpstreamOptions = {},
 ): Promise<{ outcome: "completed" | "advanced" | "failed" }> {
   try {
     if (task.kind === "backfill-liked-tracks") {
@@ -100,7 +107,7 @@ export async function runResolutionTask(
       return { outcome: finished ? "completed" : "advanced" };
     }
     if (task.kind === "resolve-musicbrainz") {
-      await resolveMusicBrainzIdentity(database, task, listenBrainzToken);
+      await resolveMusicBrainzIdentity(database, task, listenBrainzToken, upstreams);
       return { outcome: "completed" };
     }
     if (task.kind === "artist-album-count") {
@@ -271,6 +278,7 @@ async function resolveMusicBrainzIdentity(
   database: D1Database,
   task: ResolutionTask,
   listenBrainzToken?: string,
+  upstreams: ResolverUpstreamOptions = {},
 ): Promise<void> {
   const row = await database
     .prepare(
@@ -296,13 +304,16 @@ async function resolveMusicBrainzIdentity(
     return;
   }
 
+  const listenBrainzOptions = { apiBaseUrl: upstreams.listenBrainzApiBaseUrl };
+  const musicBrainzOptions = { apiBaseUrl: upstreams.musicBrainzApiBaseUrl };
+
   try {
     // Already identified: the only thing left to fetch is the composition.
     // Re-running the name lookup would spend a request rediscovering an
     // answer already stored — which matters because a bulk pass over
     // already-resolved tracks is exactly how this task gets re-enqueued.
     if (row.recording_mbid !== null) {
-      const detail = await findRecordingDetail(row.recording_mbid);
+      const detail = await findRecordingDetail(row.recording_mbid, musicBrainzOptions);
       await writeRecordingIdentity(database, task.subjectUri, detail);
       await completeResolution(database, task);
       return;
@@ -317,6 +328,7 @@ async function resolveMusicBrainzIdentity(
       const mapped = await mapRecording(
         { artistName: row.artist_name, recordingName: row.name },
         listenBrainzToken,
+        listenBrainzOptions,
       );
       recordingMbid = mapped?.recordingMbid ?? null;
 
@@ -333,6 +345,7 @@ async function resolveMusicBrainzIdentity(
           const retried = await mapRecording(
             { artistName: row.artist_name, recordingName: stripped },
             listenBrainzToken,
+            listenBrainzOptions,
           );
           recordingMbid = retried?.recordingMbid ?? null;
         }
@@ -344,13 +357,13 @@ async function resolveMusicBrainzIdentity(
     // "Ace of Spades" has no ISRC entry at all — so a miss falls back to
     // searching by title, artist and length rather than giving up.
     if (recordingMbid === null) {
-      let recording = row.isrc == null ? null : await findRecordingByIsrc(row.isrc);
+      let recording = row.isrc == null ? null : await findRecordingByIsrc(row.isrc, musicBrainzOptions);
       if (recording === null && row.artist_name !== null && row.duration_seconds !== null) {
         recording = await searchRecording({
           title: row.name,
           artistName: row.artist_name,
           durationSeconds: row.duration_seconds,
-        });
+        }, musicBrainzOptions);
       }
       if (recording !== null) {
         await writeRecordingIdentity(database, task.subjectUri, recording);
@@ -362,7 +375,7 @@ async function resolveMusicBrainzIdentity(
     // ListenBrainz returns the recording but never the work relation, so the
     // composition still needs one MusicBrainz call. It is the only one made
     // on this path, and only for tracks that actually matched.
-    const detail = await findRecordingDetail(recordingMbid);
+    const detail = await findRecordingDetail(recordingMbid, musicBrainzOptions);
     await writeRecordingIdentity(database, task.subjectUri, detail);
     await completeResolution(database, task);
   } catch (error) {
